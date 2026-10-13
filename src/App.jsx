@@ -31,8 +31,10 @@ import {
 } from 'lucide-react';
 import { parsePhonePePdf } from './lib/parser';
 import { hasSupabaseConfig, signInWithGoogle, supabase } from './lib/supabase';
+import { productConfig } from './config';
 import {
   clearLocalTransactions,
+  deleteCloudTransactions,
   fetchCloudTransactions,
   mergeTransactions,
   readLocalTransactions,
@@ -401,9 +403,70 @@ function GroupTransactionsDrawer({ transactions, onClose, onOpen }) {
   );
 }
 
-function Header({ session, onLogin, onLogout, cloudMode, onPrivacy, onMenu }) {
+function SupportEmail() {
+  if (productConfig.supportEmailIsPlaceholder) {
+    return <span className="placeholder-email" title="Replace this address before the public launch">{productConfig.supportEmail}</span>;
+  }
+  return <a className="support-email" href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>;
+}
+
+function LegalPage({ page, session, onDeleteData, deleting }) {
+  const titles = {
+    privacy: ['Privacy Policy', 'Clear, simple information about how Spendwise handles your data.'],
+    terms: ['Terms of Use', 'The rules for using Spendwise responsibly.'],
+    help: ['Help & Contact', 'Answers about statements, accounts, and your data.'],
+  };
+  const [title, subtitle] = titles[page] || titles.privacy;
+
+  return (
+    <main className="legal-page shell">
+      <a className="back-button" href="/"><ArrowLeft size={17} />Back to Spendwise</a>
+      <header className="legal-heading">
+        <div className="eyebrow"><ShieldCheck size={15} /> Spendwise information centre</div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+        <small>Last updated: {productConfig.policyLastUpdated}</small>
+      </header>
+
+      {page === 'privacy' && <div className="legal-content">
+        <section><h2>1. Who we are</h2><p>Spendwise is an independent student project that helps people organise transactions from PhonePe statements. In this policy, “we”, “us”, and “Spendwise” mean {productConfig.policyOwner}.</p></section>
+        <section><h2>2. Your statement PDF stays on your device</h2><p>Spendwise reads an original, text-based PhonePe PDF inside your browser. The PDF file itself is not uploaded to our server, Supabase, AWS Amplify, or another storage service. We do not keep a copy of the PDF.</p></section>
+        <section><h2>3. Information saved after you sign in</h2><p>When you choose to import a statement while signed in, Spendwise may save extracted transaction fields: date, time, debit or credit type, amount, counterparty name, transaction ID, UTR number, masked account suffix, and the imported file name. We use basic Google account information supplied through Google Sign-In, such as your email address and profile name, to identify your account.</p></section>
+        <section><h2>4. Why we use this information</h2><p>We use this information only to show your transaction history, monthly groups, daily details, duplicate protection, and cross-device access for your signed-in Spendwise account. Spendwise does not request access to your Gmail, Google Drive, contacts, calendar, or other Google data.</p></section>
+        <section><h2>5. Where data is kept and protected</h2><p>Extracted transaction data is stored in Supabase after sign-in. Our database rules are designed so that each signed-in user can access only their own transaction rows. The Spendwise web interface is hosted through AWS Amplify. No online service can promise absolute security, but we use account-based access controls and Row Level Security to reduce unauthorised access.</p></section>
+        <section><h2>6. Your choices and deletion</h2><p>You can delete all imported transaction records from inside your signed-in Spendwise account. This removes stored transaction rows but does not delete your Google account itself. For an account-deletion request or questions about your data, contact <SupportEmail />.</p>{productConfig.supportEmailIsPlaceholder && <p className="temporary-note"><Info size={15} /> A dedicated support address is being prepared. This placeholder must be replaced before public launch.</p>}</section>
+        <section><h2>7. Sharing and selling</h2><p>Spendwise does not sell personal data or transaction data. We do not intentionally share transaction data with advertisers. Service providers used to operate the app, such as Supabase and AWS Amplify, process only what is needed to provide the service.</p></section>
+        <section><h2>8. Changes to this policy</h2><p>We may update this policy as Spendwise develops. The latest version will be available on this page with an updated date.</p></section>
+      </div>}
+
+      {page === 'terms' && <div className="legal-content">
+        <section><h2>1. Using Spendwise</h2><p>Spendwise is intended to help students organise their own PhonePe statement transactions. Use it only with statements you are authorised to access. Do not upload another person’s statement without their clear permission.</p></section>
+        <section><h2>2. What Spendwise does</h2><p>Spendwise extracts text from supported PhonePe PDF statements, shows individual transactions, and groups exact matching counterparty names. It does not provide financial, tax, legal, investment, or banking advice.</p></section>
+        <section><h2>3. Accuracy and review</h2><p>PDF layouts and names can vary. You should review your imported data before relying on it. Spendwise does not merge similar-looking names and should not be treated as an official PhonePe record.</p></section>
+        <section><h2>4. Your account</h2><p>You sign in through Google. Keep control of your Google account and sign out from shared devices. You are responsible for activity performed through your account.</p></section>
+        <section><h2>5. Availability</h2><p>Spendwise is an evolving student project and may change, be paused, or be unavailable from time to time. We may update or remove features as the product develops.</p></section>
+        <section><h2>6. Privacy and deletion</h2><p>Our handling of statement data is explained in the <a href="?page=privacy">Privacy Policy</a>. You can remove imported transactions from within the product. For account-deletion questions, contact <SupportEmail />.</p></section>
+        <section><h2>7. Contact</h2><p>Questions about these terms can be sent to <SupportEmail />.</p></section>
+      </div>}
+
+      {page === 'help' && <div className="legal-content help-content">
+        <section><h2>How do I import a PhonePe statement?</h2><ol><li>Open PhonePe and find your statements or transaction history.</li><li>Choose the date range and download the original PDF.</li><li>Sign in to Spendwise with Google, then upload the PDF.</li><li>Wait for Spendwise to read the transaction text on your device.</li></ol><p>Image-only PDFs, screenshots, and scanned pages cannot be read reliably yet.</p></section>
+        <section><h2>Does Spendwise upload my PDF?</h2><p>No. The PDF is read in your browser. Only extracted transaction fields are saved after you sign in, so your account can show the same data on another device.</p></section>
+        <section><h2>Why is a transaction missing or grouped separately?</h2><p>Spendwise groups only exact PhonePe names. For example, “Friend-1” and “Friend-1K” remain separate. A statement with no selectable text may also need the original PhonePe PDF rather than a scan.</p></section>
+        <section className="data-control"><h2>Manage your imported data</h2><p>Deleting imported data permanently removes all transaction records stored for your signed-in Spendwise account. It does not delete your Google account.</p>{session ? <button className="danger-button" disabled={deleting} onClick={onDeleteData}>{deleting ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}{deleting ? 'Deleting imported data…' : 'Delete all imported data'}</button> : <p className="signin-note"><LockKeyhole size={15} /> Sign in to manage imported data.</p>}<p className="support-copy">For an account-deletion request or support, contact <SupportEmail />.</p>{productConfig.supportEmailIsPlaceholder && <p className="temporary-note"><Info size={15} /> This address is temporary and will be replaced before public launch.</p>}</section>
+        <section><h2>Contact</h2><p>Need help? Contact <SupportEmail />. We aim to add a dedicated support address before Spendwise is opened to the public.</p></section>
+      </div>}
+    </main>
+  );
+}
+
+function Footer() {
+  return <footer><Logo /><span>Private by design. Built for student spending clarity.</span><nav className="footer-links"><a href="?page=privacy">Privacy</a><a href="?page=terms">Terms</a><a href="?page=help">Help & Contact</a></nav><span>© {new Date().getFullYear()} Spendwise</span></footer>;
+}
+
+function Header({ session, onLogin, onLogout, cloudMode }) {
   const name = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
-  return <header className="site-header"><div className="header-inner"><Logo /><nav><button onClick={onPrivacy}>Privacy</button><a href="#how-it-works">How it works</a></nav><div className="header-actions">{session ? <><span className="user-chip">{session.user.user_metadata?.avatar_url ? <img src={session.user.user_metadata.avatar_url} alt="" /> : <span>{name?.charAt(0)?.toUpperCase()}</span>}{name}</span><button className="icon-button" onClick={onLogout} title="Sign out"><LogOut size={18} /></button></> : cloudMode ? <button className="login-button" onClick={onLogin}><LogIn size={17} /> Continue with Google</button> : <span className="local-chip"><Landmark size={14} /> Local preview</span>}<button className="mobile-menu" onClick={onMenu} aria-label="Open menu"><Menu size={19} /></button></div></div></header>;
+  return <header className="site-header"><div className="header-inner"><a href="/" aria-label="Spendwise home"><Logo /></a><nav><a href="?page=privacy">Privacy</a><a href="?page=help">How it works</a></nav><div className="header-actions">{session ? <><span className="user-chip">{session.user.user_metadata?.avatar_url ? <img src={session.user.user_metadata.avatar_url} alt="" /> : <span>{name?.charAt(0)?.toUpperCase()}</span>}{name}</span><button className="icon-button" onClick={onLogout} title="Sign out"><LogOut size={18} /></button></> : cloudMode ? <button className="login-button" onClick={onLogin}><LogIn size={17} /> Continue with Google</button> : <span className="local-chip"><Landmark size={14} /> Local preview</span>}<a className="mobile-menu" href="?page=help" aria-label="Open help and information"><Menu size={19} /></a></div></div></header>;
 }
 
 function PrivacyModal({ onClose }) {
@@ -424,7 +487,7 @@ function App() {
   const [showUpload, setShowUpload] = useState(false);
   const [transactionDrawer, setTransactionDrawer] = useState(null);
   const [groupDrawer, setGroupDrawer] = useState(null);
-  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [deletingData, setDeletingData] = useState(false);
 
   const notify = (text, kind = 'success') => {
     setToast({ text, kind });
@@ -528,23 +591,48 @@ function App() {
     notify('Local preview data removed.');
   };
 
+  const deleteAllImportedData = async () => {
+    const message = hasSupabaseConfig
+      ? 'Delete every imported transaction from your Spendwise account? This cannot be undone.'
+      : 'Delete every locally stored preview transaction from this browser? This cannot be undone.';
+    if (!window.confirm(message)) return;
+    setDeletingData(true);
+    try {
+      if (hasSupabaseConfig && session) {
+        await deleteCloudTransactions(session.user.id);
+      } else {
+        clearLocalTransactions();
+      }
+      setTransactions([]);
+      setView('overview');
+      notify('Your imported transaction data has been deleted.');
+    } catch (error) {
+      notify(`Could not delete imported data: ${error.message}`, 'error');
+    } finally {
+      setDeletingData(false);
+    }
+  };
+
+  const requestedLegalPage = new URLSearchParams(window.location.search).get('page');
+  const legalPage = ['privacy', 'terms', 'help'].includes(requestedLegalPage) ? requestedLegalPage : null;
   const hasData = transactions.length > 0;
 
   return (
     <div className="app-shell">
-      <Header session={session} onLogin={onLogin} onLogout={onLogout} cloudMode={hasSupabaseConfig} onPrivacy={() => setShowPrivacy(true)} onMenu={() => setShowPrivacy(true)} />
+      <Header session={session} onLogin={onLogin} onLogout={onLogout} cloudMode={hasSupabaseConfig} />
       {!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Preview mode:</b> add Supabase environment variables to enable Google sign-in and encrypted account-based sync.</span>{hasData && <button onClick={eraseLocalPreview}><Trash2 size={14} /> Clear local data</button>}</div>}
-      {!hasData && !showUpload ? <Landing onFile={onFile} parsing={parsing} progress={progress} onDemo={onDemo} canDemo={!hasSupabaseConfig} onLogin={onLogin} isCloudMode={hasSupabaseConfig} /> : <>
-        {view === 'overview' && <Overview transactions={transactions} activeTab={activeTab} setActiveTab={setActiveTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onUpload={() => setShowUpload(true)} />}
-        {view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('overview')} onTransaction={(items) => setGroupDrawer(items)} />}
-        {view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('overview')} onOpenTransaction={setTransactionDrawer} />}
+      {legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={deleteAllImportedData} deleting={deletingData} /> : <>
+        {!hasData && !showUpload ? <Landing onFile={onFile} parsing={parsing} progress={progress} onDemo={onDemo} canDemo={!hasSupabaseConfig} onLogin={onLogin} isCloudMode={hasSupabaseConfig} /> : <>
+          {view === 'overview' && <Overview transactions={transactions} activeTab={activeTab} setActiveTab={setActiveTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onUpload={() => setShowUpload(true)} />}
+          {view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('overview')} onTransaction={(items) => setGroupDrawer(items)} />}
+          {view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('overview')} onOpenTransaction={setTransactionDrawer} />}
+        </>}
       </>}
       {showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={onFile} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}
       <TransactionDrawer transaction={transactionDrawer} onClose={() => setTransactionDrawer(null)} />
       <GroupTransactionsDrawer transactions={groupDrawer} onClose={() => setGroupDrawer(null)} onOpen={(transaction) => { setGroupDrawer(null); setTransactionDrawer(transaction); }} />
-      {showPrivacy && <PrivacyModal onClose={() => setShowPrivacy(false)} />}
       <Toast message={toast} onClose={() => setToast(null)} />
-      <footer id="how-it-works"><Logo /><span>Private by design. Built for student spending clarity.</span><span>© {new Date().getFullYear()} Spendwise</span></footer>
+      <Footer />
     </div>
   );
 }

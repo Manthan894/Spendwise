@@ -88,6 +88,15 @@ export async function saveCloudTransactions(userId, transactions, sourceFileName
   if (error) throw error;
 }
 
+export async function deleteCloudTransactions(userId) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('user_id', userId);
+  if (error) throw error;
+}
+
 export function clearLocalTransactions() {
   localStorage.removeItem(STORAGE_KEY);
 }

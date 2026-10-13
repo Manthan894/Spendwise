@@ -293,3 +293,44 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
   footer { min-height: 115px; flex-wrap: wrap; padding: 20px 0; gap: 11px; }
   footer span:last-child { width: 100%; }
 }
+
+/* Public trust, policy, and self-service data-management pages */
+.footer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.footer-links a { color: #6b62a5; font-weight: 700; }
+.footer-links a:hover { color: #4f42c6; }
+.legal-page { min-height: calc(100vh - 171px); padding-top: 37px; padding-bottom: 86px; }
+.legal-heading { padding: 29px 0 30px; border-bottom: 1px solid #e9e7f0; }
+.legal-heading h1 { color: #2a2b44; font-size: clamp(32px, 5vw, 47px); letter-spacing: -2.3px; margin: 12px 0 10px; }
+.legal-heading > p { color: #717184; font-size: 16px; margin-bottom: 10px; }
+.legal-heading small { color: #9a97a5; font-size: 12px; }
+.legal-content { width: min(760px, 100%); padding-top: 31px; }
+.legal-content section { padding: 0 0 26px; margin-bottom: 25px; border-bottom: 1px solid #eceaf2; }
+.legal-content section:last-child { border-bottom: 0; }
+.legal-content h2 { color: #37384f; font-size: 18px; letter-spacing: -.5px; margin-bottom: 9px; }
+.legal-content p, .legal-content li { color: #686879; font-size: 14px; line-height: 1.72; }
+.legal-content p:last-child { margin-bottom: 0; }
+.legal-content ol { color: #686879; padding-left: 21px; margin: 0 0 11px; }
+.legal-content a, .support-email { color: #5c4fd1; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.placeholder-email { display: inline-block; color: #9c651e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; font-weight: 700; background: #fff5e6; border-radius: 5px; padding: 0 4px; }
+.temporary-note { color: #91631f !important; background: #fff8e9; border: 1px solid #f4dfb9; display: flex; align-items: flex-start; gap: 7px; padding: 10px 11px; border-radius: 10px; font-size: 12px !important; line-height: 1.5 !important; margin-top: 14px; }
+.temporary-note svg { flex: 0 0 auto; margin-top: 2px; }
+.data-control { padding: 22px !important; background: #f7f6ff; border: 1px solid #e1def9 !important; border-radius: 17px; }
+.data-control h2 { color: #484091; }
+.danger-button { border: 1px solid #e2aba2; background: #fff7f6; color: #af453b; border-radius: 10px; font-weight: 800; padding: 11px 13px; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.danger-button:hover { background: #ffedea; }
+.danger-button:disabled { opacity: .68; }
+.signin-note { display: inline-flex; align-items: center; gap: 7px; color: #736a90 !important; font-weight: 700; }
+.support-copy { margin-top: 16px !important; }
+
+@media (max-width: 620px) {
+  .legal-page { padding-top: 27px; padding-bottom: 57px; }
+  .legal-heading { padding: 24px 0; }
+  .legal-heading h1 { font-size: 32px; letter-spacing: -1.65px; }
+  .legal-heading > p { font-size: 14px; line-height: 1.55; }
+  .legal-content { padding-top: 26px; }
+  .legal-content section { padding-bottom: 21px; margin-bottom: 21px; }
+  .legal-content h2 { font-size: 16px; }
+  .legal-content p, .legal-content li { font-size: 13px; }
+  .data-control { padding: 17px !important; }
+  .footer-links { width: 100%; order: 3; }
+}
