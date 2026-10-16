@@ -305,6 +305,7 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
 .legal-heading small { color: #9a97a5; font-size: 12px; }
 .legal-content { width: min(760px, 100%); padding-top: 31px; }
 .legal-content section { padding: 0 0 26px; margin-bottom: 25px; border-bottom: 1px solid #eceaf2; }
+
 .legal-content section:last-child { border-bottom: 0; }
 .legal-content h2 { color: #37384f; font-size: 18px; letter-spacing: -.5px; margin-bottom: 9px; }
 .legal-content p, .legal-content li { color: #686879; font-size: 14px; line-height: 1.72; }
@@ -333,4 +334,108 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
   .legal-content p, .legal-content li { font-size: 13px; }
   .data-control { padding: 17px !important; }
   .footer-links { width: 100%; order: 3; }
+}
+
+/* Yearly analysis */
+.yearly-page { padding-top: 36px; padding-bottom: 92px; }
+.yearly-heading { display: flex; justify-content: space-between; align-items: end; gap: 28px; margin: 25px 0 24px; }
+.yearly-heading h1 { color: #26263e; font-size: clamp(31px, 4vw, 41px); letter-spacing: -2px; margin: 9px 0 7px; }
+.yearly-heading p { color: #777789; font-size: 14px; margin: 0; }
+.period-select-label { color: #7f7d8e; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; display: grid; gap: 6px; min-width: 280px; }
+.period-select-wrap { position: relative; }
+.period-select-wrap select { appearance: none; width: 100%; color: #4c4a62; background: #fff; border: 1px solid #dfdcea; border-radius: 11px; padding: 11px 35px 11px 12px; font-size: 13px; font-weight: 700; outline: none; cursor: pointer; }
+.period-select-wrap select:focus { border-color: #7466e7; box-shadow: 0 0 0 3px #eeeaff; }
+.period-select-wrap svg { pointer-events: none; position: absolute; color: #848191; right: 11px; top: 50%; transform: translateY(-50%); }
+.yearly-period-banner { color: #5c5b70; border: 1px solid #e4e0fa; border-radius: 15px; background: linear-gradient(100deg, #f5f3ff, #fbfbff); padding: 15px 17px; display: flex; gap: 11px; align-items: center; margin-bottom: 16px; }
+.yearly-period-banner > span { width: 34px; height: 34px; color: #6659d7; background: #e8e4ff; border-radius: 11px; display: grid; place-items: center; }
+.yearly-period-banner strong, .yearly-period-banner small { display: block; }
+.yearly-period-banner strong { color: #494660; font-size: 13px; }
+.yearly-period-banner small { color: #898697; margin-top: 3px; font-size: 11px; }
+.yearly-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 31px; }
+.yearly-summary-grid article { display: flex; align-items: flex-start; gap: 11px; min-height: 103px; border: 1px solid #e9e7f1; background: #fff; border-radius: 16px; padding: 16px; }
+.year-stat-icon { width: 36px; height: 36px; flex: 0 0 36px; display: grid; place-items: center; border-radius: 11px; }
+.year-stat-icon.violet { color: #6255d5; background: #ece9ff; }
+.year-stat-icon.peach { color: #c36e36; background: #fff0e3; }
+.year-stat-icon.mint { color: #26956b; background: #e4f6ee; }
+.year-stat-icon.sky { color: #337eae; background: #e4f3fd; }
+.yearly-summary-grid small, .yearly-summary-grid strong, .yearly-summary-grid em { display: block; }
+.yearly-summary-grid small { color: #898798; font-size: 11px; font-weight: 700; }
+.yearly-summary-grid strong { color: #34354c; font-family: 'Plus Jakarta Sans'; font-size: 18px; letter-spacing: -.7px; margin: 4px 0 3px; white-space: nowrap; }
+.yearly-summary-grid em { color: #a09eaa; font-size: 10px; font-style: normal; }
+.yearly-ranking { overflow: hidden; background: #fff; border: 1px solid #eae8f2; border-radius: 19px; }
+.yearly-ranking-heading { display: flex; justify-content: space-between; gap: 15px; align-items: center; padding: 24px 22px 19px; }
+.yearly-ranking-heading h2 { color: #35364c; font-size: 18px; letter-spacing: -.65px; margin: 0 0 5px; }
+.yearly-ranking-heading p { color: #908e9d; font-size: 12px; margin: 0; }
+.ranking-rule { color: #71659d; background: #f3f1ff; border-radius: 999px; padding: 7px 9px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 10px; font-weight: 800; }
+.yearly-table-head, .yearly-row { display: grid; grid-template-columns: 64px minmax(240px, 1fr) 112px 125px 125px 32px; gap: 12px; align-items: center; }
+.yearly-table-head { color: #9593a1; background: #fbfaff; padding: 12px 22px; text-transform: uppercase; font-size: 10px; letter-spacing: .7px; font-weight: 800; }
+.yearly-table-head span:nth-child(n+3) { text-align: right; }
+.yearly-row { min-height: 77px; padding: 13px 22px; border-top: 1px solid #f0eff4; transition: background .15s ease; }
+.yearly-row:hover { background: #fdfcff; }
+.rank-number { width: 37px; height: 29px; color: #777487; background: #f2f1f7; border-radius: 9px; display: grid; place-items: center; font-family: 'Plus Jakarta Sans'; font-size: 12px; font-weight: 800; }
+.rank-number.top-1 { color: #8b6505; background: #fff1bf; }
+.rank-number.top-2 { color: #626777; background: #e9edf2; }
+.rank-number.top-3 { color: #a05c33; background: #ffe8da; }
+.yearly-counterparty { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.yearly-counterparty strong, .yearly-counterparty small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.yearly-counterparty strong { color: #47485b; font-size: 13px; }
+.yearly-counterparty small { color: #9996a3; margin-top: 3px; font-size: 11px; }
+.yearly-count, .yearly-paid, .yearly-received { text-align: right; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.yearly-count { color: #505064; font-family: 'Plus Jakarta Sans'; }
+.yearly-paid { color: #5f5d70; }
+.yearly-received { color: #27926a; }
+.yearly-open { width: 30px; height: 30px; color: #9693a3; background: transparent; border-radius: 8px; display: grid; place-items: center; }
+.yearly-open:hover { color: #5c50cf; background: #f1effd; }
+.yearly-unavailable-page { min-height: calc(100vh - 171px); }
+.yearly-unavailable-card { width: min(640px, 100%); text-align: center; border: 1px solid #e5e1f8; background: #fff; border-radius: 23px; padding: 43px 38px; margin: 38px auto 70px; box-shadow: 0 19px 44px rgba(53, 45, 118, .07); }
+.yearly-empty-icon { width: 60px; height: 60px; color: #6659d9; background: #edeaff; border-radius: 20px; display: grid; place-items: center; margin: 0 auto 19px; }
+.yearly-unavailable-card .eyebrow { justify-content: center; }
+.yearly-unavailable-card h1 { color: #33344b; font-size: clamp(25px, 4vw, 33px); letter-spacing: -1.45px; margin: 12px 0 11px; }
+.yearly-unavailable-card > p { color: #777587; max-width: 475px; font-size: 14px; line-height: 1.6; margin: 0 auto 17px; }
+.history-progress { width: min(420px, 100%); height: 9px; overflow: hidden; background: #ecebf4; border-radius: 99px; margin: 22px auto 10px; }
+.history-progress span { display: block; height: 100%; min-width: 5px; background: linear-gradient(90deg, #7669e9, #a296ff); border-radius: inherit; }
+.history-detail { display: flex; justify-content: space-between; max-width: 420px; color: #878596; font-size: 11px; margin: 0 auto 21px; text-align: left; }
+.history-detail strong { color: #5b596d; font-size: 11px; }
+.gap-note { color: #775c30 !important; background: #fff8e9; border: 1px solid #f0dfba; border-radius: 11px; padding: 10px 12px; display: flex; align-items: flex-start; gap: 7px; text-align: left; font-size: 12px !important; }
+.gap-note svg { flex: 0 0 auto; margin-top: 2px; }
+.yearly-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 23px; }
+.secondary-button { color: #6256d3; border: 1px solid #dad5fa; background: #fbfaff; border-radius: 11px; padding: 11px 12px; font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; gap: 6px; }
+.secondary-button:hover { background: #f0eeff; }
+
+@media (max-width: 960px) {
+  .yearly-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .yearly-table-head, .yearly-row { grid-template-columns: 55px minmax(170px, 1fr) 87px 105px 105px 28px; gap: 9px; padding-left: 15px; padding-right: 15px; }
+  .yearly-ranking-heading { padding-left: 15px; padding-right: 15px; }
+}
+
+@media (max-width: 620px) {
+  .yearly-page { padding-top: 29px; padding-bottom: 58px; }
+  .yearly-heading { align-items: stretch; flex-direction: column; gap: 17px; margin: 21px 0 18px; }
+  .yearly-heading h1 { font-size: 29px; letter-spacing: -1.5px; }
+  .period-select-label { min-width: 0; }
+  .yearly-period-banner { padding: 13px; margin-bottom: 12px; }
+  .yearly-summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 21px; }
+  .yearly-summary-grid article { min-height: 95px; gap: 8px; padding: 12px; }
+  .year-stat-icon { width: 30px; height: 30px; flex-basis: 30px; border-radius: 9px; }
+  .year-stat-icon svg { width: 16px; }
+  .yearly-summary-grid strong { font-size: 15px; }
+  .yearly-summary-grid em { display: none; }
+  .yearly-ranking { border-radius: 15px; }
+  .yearly-ranking-heading { align-items: flex-start; flex-direction: column; gap: 10px; padding: 18px 14px 14px; }
+  .ranking-rule { font-size: 9px; }
+  .yearly-table-head { display: none; }
+  .yearly-row { grid-template-columns: 42px minmax(0, 1fr) 24px; grid-template-areas: 'rank person open' '. activity activity'; min-height: 89px; gap: 8px 9px; padding: 13px 14px; }
+  .rank-number { grid-area: rank; width: 36px; }
+  .yearly-counterparty { grid-area: person; }
+  .yearly-open { grid-area: open; }
+  .yearly-count { grid-area: activity; justify-self: start; text-align: left; margin-left: 0; color: #5c5a6b; font-size: 11px; }
+  .yearly-count::after { content: ' total transactions'; color: #9b98a5; font-family: 'DM Sans'; font-size: 10px; font-weight: 600; }
+  .yearly-paid, .yearly-received { grid-area: activity; align-self: end; justify-self: end; font-size: 11px; }
+  .yearly-paid { margin-right: 77px; }
+  .yearly-paid::before { content: 'Paid '; color: #9996a4; font-size: 10px; font-weight: 600; }
+  .yearly-received::before { content: 'In '; color: #9996a4; font-size: 10px; font-weight: 600; }
+  .yearly-unavailable-card { padding: 33px 19px; margin-top: 27px; border-radius: 19px; }
+  .yearly-unavailable-card h1 { font-size: 27px; }
+  .yearly-empty-actions { display: grid; grid-template-columns: 1fr; }
+  .yearly-empty-actions button { width: 100%; }
 }

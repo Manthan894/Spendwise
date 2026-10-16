@@ -29,6 +29,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import YearlyAnalysis from './components/YearlyAnalysis';
 import { parsePhonePePdf } from './lib/parser';
 import { hasSupabaseConfig, signInWithGoogle, supabase } from './lib/supabase';
 import { productConfig } from './config';
@@ -255,7 +256,7 @@ function DayCard({ day, items, onClick }) {
   );
 }
 
-function Overview({ transactions, activeTab, setActiveTab, monthPage, setMonthPage, onMonth, onDay, onUpload }) {
+function Overview({ transactions, activeTab, setActiveTab, monthPage, setMonthPage, onMonth, onDay, onYearly, onUpload }) {
   const monthItems = useMemo(() => {
     const map = new Map();
     for (const transaction of transactions) {
@@ -294,9 +295,10 @@ function Overview({ transactions, activeTab, setActiveTab, monthPage, setMonthPa
       <section className="data-section">
         <div className="section-heading">
           <div><h2>Your statements</h2><p>Only months found in your imported PDFs appear below.</p></div>
-          <div className="segmented" aria-label="Statement grouping">
+          <div className="segmented three-options" aria-label="Statement grouping">
             <button className={activeTab === 'monthly' ? 'active' : ''} onClick={() => setActiveTab('monthly')}><CalendarDays size={15} /> Monthly</button>
             <button className={activeTab === 'daily' ? 'active' : ''} onClick={() => setActiveTab('daily')}><ReceiptText size={15} /> Daily</button>
+            <button onClick={onYearly}><Sparkles size={15} /> Yearly</button>
           </div>
         </div>
         {monthItems.length > 12 && <div className="twelve-note"><Info size={15} /> Showing 12 months at a time. Use the arrows to move through your history.</div>}
@@ -623,9 +625,10 @@ function App() {
       {!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Preview mode:</b> add Supabase environment variables to enable Google sign-in and encrypted account-based sync.</span>{hasData && <button onClick={eraseLocalPreview}><Trash2 size={14} /> Clear local data</button>}</div>}
       {legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={deleteAllImportedData} deleting={deletingData} /> : <>
         {!hasData && !showUpload ? <Landing onFile={onFile} parsing={parsing} progress={progress} onDemo={onDemo} canDemo={!hasSupabaseConfig} onLogin={onLogin} isCloudMode={hasSupabaseConfig} /> : <>
-          {view === 'overview' && <Overview transactions={transactions} activeTab={activeTab} setActiveTab={setActiveTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onUpload={() => setShowUpload(true)} />}
+          {view === 'overview' && <Overview transactions={transactions} activeTab={activeTab} setActiveTab={setActiveTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onYearly={() => setView('yearly')} onUpload={() => setShowUpload(true)} />}
           {view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('overview')} onTransaction={(items) => setGroupDrawer(items)} />}
           {view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('overview')} onOpenTransaction={setTransactionDrawer} />}
+          {view === 'yearly' && <YearlyAnalysis transactions={transactions} onBack={() => setView('overview')} onUpload={() => setShowUpload(true)} onMonthly={() => { setActiveTab('monthly'); setView('overview'); }} onDaily={() => { setActiveTab('daily'); setView('overview'); }} onOpenGroup={setGroupDrawer} />}
         </>}
       </>}
       {showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={onFile} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}

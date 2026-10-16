@@ -56,13 +56,31 @@ function databaseToTransaction(row) {
 
 export async function fetchCloudTransactions() {
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('*')
-    .order('transaction_date', { ascending: false })
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(databaseToTransaction);
+
+  // Supabase applies a maximum row limit to a single select request. A student
+  // can easily have more than that across a full year, so fetch every page
+  // before building monthly, daily, or yearly summaries.
+  const pageSize = 1000;
+  const allRows = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('transaction_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const rows = data || [];
+    allRows.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows.map(databaseToTransaction);
 }
 
 export async function saveCloudTransactions(userId, transactions, sourceFileName) {

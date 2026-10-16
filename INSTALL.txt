@@ -1,0 +1,12 @@
+Spendwise Yearly Analysis update
+
+1. Extract this ZIP into the root of your existing Spendwise project.
+2. Allow the listed files under src/ and README.md to be overwritten.
+3. Run: npm run dev
+4. Test Yearly from the dashboard.
+5. Commit and deploy:
+   git add src/App.jsx src/styles.css src/lib/storage.js src/lib/yearlyAnalysis.js src/components/YearlyAnalysis.jsx README.md
+   git commit -m "Add yearly transaction analysis"
+   git push
+
+No Supabase SQL, AWS environment-variable, Google OAuth, or package.json changes are required.
