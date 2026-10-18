@@ -1,6 +1,6 @@
--- Spendwise v1.1 database schema
--- Run this in Supabase Dashboard → SQL Editor before configuring the app.
--- The original PhonePe PDF is never uploaded to Supabase.
+-- TrackPay base database schema
+-- Run this in Supabase Dashboard → SQL Editor before configuring a new project.
+-- The original PhonePe, GPay, Paytm, or Navi PDF is never uploaded to Supabase.
 
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
@@ -19,6 +19,7 @@ create table if not exists public.transactions (
   description text,
   source_page integer,
   source_file_name text,
+  source_app text not null default 'phonepe' check (source_app in ('phonepe', 'gpay', 'paytm', 'navi')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, fingerprint)

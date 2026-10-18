@@ -1,20 +1,31 @@
 import { buildFingerprint } from './parser';
 import { supabase } from './supabase';
 
-const STORAGE_KEY = 'spendwise:transactions:v1';
+const STORAGE_KEY = 'trackpay:transactions:v1';
+const LEGACY_STORAGE_KEY = 'spendwise:transactions:v1';
+const PROFILE_STORAGE_KEY = 'trackpay:profile:v1';
 
 function normalize(transaction) {
+  const sourceApp = transaction.sourceApp || transaction.source_app || 'phonepe';
   return {
     ...transaction,
-    fingerprint: buildFingerprint(transaction),
+    sourceApp,
+    fingerprint: buildFingerprint({ ...transaction, sourceApp }),
     amountPaise: Number(transaction.amountPaise),
   };
 }
 
+function newestFirst(a, b) {
+  return `${b.date || ''} ${b.time || ''}`.localeCompare(`${a.date || ''} ${a.time || ''}`);
+}
+
 export function readLocalTransactions() {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    return Array.isArray(stored) ? stored.map(normalize) : [];
+    // Preserve un-synced Spendwise preview history during the TrackPay upgrade.
+    const active = localStorage.getItem(STORAGE_KEY);
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const stored = JSON.parse(active || legacy || '[]');
+    return Array.isArray(stored) ? stored.map(normalize).sort(newestFirst) : [];
   } catch {
     return [];
   }
@@ -24,22 +35,42 @@ export function writeLocalTransactions(transactions) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions.map(normalize)));
 }
 
+export function clearLocalTransactions() {
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
+}
+
+export function readLocalProfile() {
+  try {
+    const profile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || '{}');
+    return profile && typeof profile === 'object' ? profile : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeLocalProfile(profile) {
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify({
+    displayName: String(profile.displayName || '').trim().slice(0, 60),
+  }));
+}
+
 export function mergeTransactions(current, incoming) {
-  const index = new Map(current.map((transaction) => [buildFingerprint(transaction), normalize(transaction)]));
+  const index = new Map(current.map((transaction) => {
+    const normalized = normalize(transaction);
+    return [normalized.fingerprint, normalized];
+  }));
   let added = 0;
   for (const transaction of incoming) {
     const normalized = normalize(transaction);
     if (!index.has(normalized.fingerprint)) added += 1;
     index.set(normalized.fingerprint, normalized);
   }
-  return {
-    added,
-    transactions: [...index.values()].sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`)),
-  };
+  return { added, transactions: [...index.values()].sort(newestFirst) };
 }
 
 function databaseToTransaction(row) {
-  return {
+  return normalize({
     fingerprint: row.fingerprint,
     transactionId: row.transaction_id,
     utr: row.utr,
@@ -48,18 +79,14 @@ function databaseToTransaction(row) {
     type: row.transaction_type,
     amountPaise: row.amount_paise,
     counterparty: row.counterparty,
-    accountLast4: row.account_last4,
     description: row.description,
     page: row.source_page,
-  };
+    sourceApp: row.source_app || 'phonepe',
+  });
 }
 
 export async function fetchCloudTransactions() {
   if (!supabase) return [];
-
-  // Supabase applies a maximum row limit to a single select request. A student
-  // can easily have more than that across a full year, so fetch every page
-  // before building monthly, daily, or yearly summaries.
   const pageSize = 1000;
   const allRows = [];
   let from = 0;
@@ -73,17 +100,15 @@ export async function fetchCloudTransactions() {
       .order('id', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) throw error;
-
     const rows = data || [];
     allRows.push(...rows);
     if (rows.length < pageSize) break;
     from += pageSize;
   }
-
-  return allRows.map(databaseToTransaction);
+  return allRows.map(databaseToTransaction).sort(newestFirst);
 }
 
-export async function saveCloudTransactions(userId, transactions, sourceFileName) {
+export async function saveCloudTransactions(userId, transactions) {
   if (!supabase || !transactions.length) return;
   const rows = transactions.map((transaction) => ({
     user_id: userId,
@@ -95,10 +120,11 @@ export async function saveCloudTransactions(userId, transactions, sourceFileName
     transaction_type: transaction.type,
     amount_paise: transaction.amountPaise,
     counterparty: transaction.counterparty,
-    account_last4: transaction.accountLast4 || null,
     description: transaction.description || null,
     source_page: transaction.page || null,
-    source_file_name: sourceFileName || null,
+    source_app: transaction.sourceApp || 'phonepe',
+    // The original PDF and its file name are intentionally not persisted.
+    source_file_name: null,
   }));
   const { error } = await supabase
     .from('transactions')
@@ -108,13 +134,27 @@ export async function saveCloudTransactions(userId, transactions, sourceFileName
 
 export async function deleteCloudTransactions(userId) {
   if (!supabase) return;
-  const { error } = await supabase
-    .from('transactions')
-    .delete()
-    .eq('user_id', userId);
+  const { error } = await supabase.from('transactions').delete().eq('user_id', userId);
   if (error) throw error;
 }
 
-export function clearLocalTransactions() {
-  localStorage.removeItem(STORAGE_KEY);
+export async function fetchCloudProfile() {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('profiles').select('display_name').maybeSingle();
+  if (error) throw error;
+  return data ? { displayName: data.display_name || '' } : null;
+}
+
+export async function saveCloudProfile(userId, displayName) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('profiles')
+    .upsert({ user_id: userId, display_name: String(displayName || '').trim().slice(0, 60) }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+export async function deleteCloudAccount() {
+  if (!supabase) throw new Error('Account deletion is only available for a signed-in cloud account.');
+  const { error } = await supabase.functions.invoke('delete-account');
+  if (error) throw new Error(error.message || 'The account deletion service could not be reached.');
 }

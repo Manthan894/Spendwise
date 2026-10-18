@@ -1,19 +1,38 @@
-# Spendwise
+# TrackPay — local-first statement analysis
 
-Spendwise helps students understand PhonePe spending without uploading their original statement. It parses a text-based PhonePe PDF in the browser, then stores only extracted transaction fields in Supabase for the signed-in user.
+TrackPay is the upgrade of Spendwise: a privacy-first student transaction-analysis web app for original, text-based payment-app statement PDFs.
 
-## What is included
+> **Local first:** this project is intended to be built and approved on localhost before any public deployment work. The original PDF is parsed in the browser and is never uploaded or stored.
 
-- Google Sign-In through Supabase Auth
-- Local PDF extraction with `pdfjs-dist`; the PDF bytes are never sent to Supabase or another server
-- PhonePe table parser for entries in the reference format: date/time, description, transaction ID, UTR, debit/credit, amount, and masked account suffix
-- Idempotent imports: a stable fingerprint plus a per-user database unique key prevents duplicate transaction records from matching/overlapping statements
-- Row Level Security (RLS) policy: users can only read/write their own rows
-- Monthly grouping by exact PhonePe counterparty name, plus daily and transaction-level details
-- Yearly Analysis: selectable continuous 12-month periods ranked by exact counterparty transaction count, with paid and received totals kept separate
-- Show only months present in imported statements; navigate a maximum of 12 months at one time
-- Paginated cloud-history loading so high-activity users can analyse more than 1,000 saved transactions
-- Responsive UI and a local-only generic demo for development
+## Current local feature set
+
+- Supported statement adapters: **PhonePe, GPay, Paytm, and Navi**.
+- Local source detection with a clear PhonePe/GPay/Paytm/Navi chooser when detection is uncertain.
+- Parse → **import review** → explicit save confirmation. No parsed transaction saves automatically.
+- Review shows source app, rows found, new rows, existing duplicates, intentionally skipped special rows, unreadable rows, and a preview.
+- GPay and Paytm reconciliation checks compare parsed totals with statement header totals when the comparison is valid.
+- `All | Monthly | Daily | Years` navigation.
+- All Transactions is newest first and has search, date-range, debit/credit, and source-app filters.
+- Monthly and Years include debit-only spending pie charts. Daily deliberately has no chart.
+- Exact-name grouping: TrackPay never fuzzy-merges similar looking names.
+- Light/dark mode and TrackPay-only display-name editing.
+- Browser-only fictional demo mode; it never writes to Supabase and never merges with real account data.
+- Google Sign-In, Supabase account isolation/RLS, cloud history pagination, duplicate prevention, clear-data, and a protected real account-deletion path.
+
+## Deliberate transaction rules
+
+TrackPay imports only **normal completed payments** and **normal received-money** records.
+
+It intentionally skips rows identified as:
+
+- refund
+- reversal
+- cashback
+- self transfer
+- failed, declined, or cancelled payment
+- pending payment
+
+Navi's user statement export supplies outgoing payment data only, so the Navi adapter does not claim to import received-money entries.
 
 ## Run locally
 
@@ -22,80 +41,83 @@ npm install
 npm run dev
 ```
 
-The app starts in **local preview mode** if it does not find Supabase keys. In that mode generic demo/imported data stays only in the browser's local storage. It is useful for UI and parser testing, but it does not provide account sync.
+Open the local Vite URL shown in the terminal. The app binds to `0.0.0.0` for the Arena preview environment.
 
-## Connect Supabase (required for the production v1.1 goal)
+Without Supabase environment variables, the product runs in **local development mode**. Real imported records stay in that browser's local storage solely for local validation. Demo data is session-only and separate.
 
-1. Create a Supabase project.
-2. In **Authentication → Providers**, enable Google and supply Google OAuth credentials.
-3. Add your local and deployed site URL to **Authentication → URL Configuration** as redirect URLs.
-4. Open **SQL Editor**, run [`supabase/schema.sql`](./supabase/schema.sql).
-5. Copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-6. Restart `npm run dev`.
+## Browser environment variables
 
-The browser only receives the Supabase *anon/publishable* key. Do not put `service_role` credentials in browser code or in `VITE_` variables.
+Create `.env.local` from `.env.example` and add only public Supabase configuration:
 
-## Deploy
+```bash
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
+```
 
-Run a production build:
+Never put these secrets in browser code or Vite variables:
+
+- Supabase `service_role` / secret key
+- database password
+- Google OAuth client secret
+- AWS credentials
+
+## Existing Spendwise → TrackPay migration
+
+1. Keep the existing `transactions` table and all rows.
+2. In Supabase SQL Editor, run:
+
+   ```text
+   supabase/trackpay-upgrade.sql
+   ```
+
+   It adds `source_app`, marks existing Spendwise history as `phonepe`, and creates the RLS-protected `profiles` table for TrackPay-only display names.
+3. Configure the two public browser environment variables above.
+4. Start TrackPay locally and sign in with the same Google account. Existing history remains available and is shown as PhonePe records.
+
+For a completely new Supabase project, run `supabase/schema.sql` first and then `supabase/trackpay-upgrade.sql`.
+
+## Real account deletion
+
+Clearing data and deleting an account are intentionally different:
+
+- **Clear saved transaction data** deletes only the signed-in user's stored transaction records.
+- **Delete TrackPay account** deletes the user's Supabase Auth identity. The database foreign-key cascades remove their TrackPay profile and transaction rows.
+
+The browser must not receive an admin key. The protected server-side function is in:
+
+```text
+supabase/functions/delete-account/index.ts
+```
+
+Before enabling the button against a real Supabase project:
+
+```bash
+supabase functions deploy delete-account
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+```
+
+Keep that service-role value only in Supabase Edge Function secrets. Do **not** add it to `.env.local`, Vite variables, Git, or the frontend.
+
+## Google sign-in checklist for localhost
+
+In Supabase Auth → URL Configuration and Google Cloud OAuth configuration, include the local URL used by Vite, commonly:
+
+```text
+http://localhost:5173
+```
+
+Also retain your Supabase callback URL in the Google OAuth client's allowed redirect URIs. Do not proceed to public-hosted URL configuration until the localhost build is approved.
+
+## Parser validation coverage
+
+The local adapters were validated against supplied original text-based GPay, Paytm, and Navi PDFs. Validation samples are not embedded in source code, demo data, or cloud storage. PhonePe's historic adapter and data migration path are preserved.
+
+Supported PDF layouts can evolve. When source identification is uncertain, TrackPay asks the user to select the app rather than guessing. If a row cannot be read reliably, the import review reports it and never silently saves it.
+
+## Quality checks used in this workspace
 
 ```bash
 npm run build
 ```
 
-Deploy the generated static `dist/` directory to your chosen static host. Configure the same environment variables in the host’s build settings. For AWS, Amplify Hosting is the lowest-friction option for this Vite app. Set a billing alert and review AWS/Supabase free-tier limits; free quotas and pricing can change.
-
-## Current parser contract
-
-The parser was designed from the supplied PhonePe statement screenshots, which show a selectable-text table with:
-
-```text
-Oct 08, 2026  Paid to PUNGLIYA TRADERS  DEBIT  ₹10
-08:35 PM      Transaction ID T...      UTR No. ...
-```
-
-It intentionally rejects image-only/scanned statements because OCR in the browser would be a separate accuracy/privacy feature. A real original PhonePe PDF should be used to validate final text positioning and any layout variations before launch.
-
-## Yearly Analysis
-
-The dashboard includes a **Yearly** option next to Monthly and Daily.
-
-- It unlocks only after at least one run of **12 consecutive months** with imported transaction data.
-- It combines all successfully imported statements for the signed-in account; users do not need to upload one single annual PDF.
-- A user can select any eligible 12-month period. April–March periods are labelled as an Indian Financial Year, January–December periods as a Calendar Year, and other periods by their month range.
-- Counterparties are grouped by their exact PhonePe name and ranked by all activity count (debits and credits together). The UI always displays **Total paid** and **Total received** separately.
-- If there is not enough continuous data, the app explains the longest available run and how many more consecutive months are needed. It does not invent coverage for a month with no imported transactions.
-
-## Privacy model
-
-- **PDF:** read in browser memory only; it is not uploaded or persisted.
-- **Cloud data:** extracted transaction fields only, written after Google sign-in.
-- **Isolation:** Supabase RLS attaches every transaction query to `auth.uid()`.
-- **Deletion:** a signed-in user can permanently delete all of their imported transaction rows from Help & Contact. This does not delete their Google identity; account-deletion requests use the public support channel.
-- **Names:** grouped exactly as shown in PhonePe; similar names are never merged in v1.
-
-## Public support address and policy pages
-
-The Privacy Policy, Terms of Use, Help & Contact page, footer links, and the temporary support address are part of the app UI. They are available directly at:
-
-```text
-/?page=privacy
-/?page=terms
-/?page=help
-```
-
-Before removing Amplify password protection or publishing Spendwise to general users, update [`src/config.js`](./src/config.js):
-
-```js
-supportEmail: 'your-real-support-address@example.com',
-supportEmailIsPlaceholder: false,
-```
-
-This one file controls every support email shown across the policy, terms, and help pages. Commit and push the change; AWS Amplify will rebuild the site automatically.
-
-## Important limitations for v1
-
-- PhonePe only
-- One masked account suffix can be captured on each row but is not exposed in the UI
-- No charts, categories, budgets, multi-account dashboard, or fuzzy merging
-- The selected transaction types are all displayed. The main “Total paid” represents only `DEBIT`; credits remain visible and are totalled separately.
+The build currently succeeds. Vite reports a non-blocking bundle-size warning because PDF.js is bundled locally so the PDF is not sent to a third party.

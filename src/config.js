@@ -1,8 +1,8 @@
-// Public product details. Replace these values before removing the Amplify
-// password-protection and launching Spendwise to general users.
+// Public TrackPay product details. Replace the support placeholder before any
+// public release. No secret keys belong in this file.
 export const productConfig = {
-  supportEmail: 'spendwise@support.example',
-  supportEmailIsPlaceholder: true, // Set to true if the support email is a placeholder and should be replaced before launch
-  policyOwner: 'Spendwise, an independent student project',
-  policyLastUpdated: '13 October 2026',
+  supportEmail: 'support@trackpay.example',
+  supportEmailIsPlaceholder: true,
+  policyOwner: 'TrackPay, an independent student project',
+  policyLastUpdated: '18 October 2026',
 };

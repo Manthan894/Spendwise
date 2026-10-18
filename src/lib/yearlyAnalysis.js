@@ -114,7 +114,7 @@ export function transactionsForYearlyPeriod(transactions, period) {
   });
 }
 
-/** Groups exact PhonePe names and ranks by all activity (debits + credits). */
+/** Groups exact statement names and ranks by all activity (debits + credits). */
 export function rankYearlyCounterparties(transactions) {
   const groups = new Map();
 

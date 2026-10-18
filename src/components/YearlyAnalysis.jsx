@@ -12,6 +12,7 @@ import {
   ReceiptText,
   ShieldCheck,
   UsersRound,
+  PieChart,
 } from 'lucide-react';
 import {
   formatAnalysisMonth,
@@ -32,6 +33,26 @@ function money(paise) {
 
 function PeriodOption({ period }) {
   return <option value={period.id}>{period.label} · {period.kind}</option>;
+}
+
+const PIE_COLORS = ['#7466e8', '#f39b64', '#4ab48a', '#62a9da', '#d673ad', '#8f86b5'];
+
+function YearlySpendingPie({ transactions }) {
+  const groups = rankYearlyCounterparties(transactions)
+    .filter((group) => group.paid > 0)
+    .sort((a, b) => b.paid - a.paid);
+  const total = groups.reduce((sum, group) => sum + group.paid, 0);
+  if (!total) return <section className="spending-pie empty"><div><PieChart size={22} /></div><p>No outgoing payments are available for this period.</p></section>;
+  const top = groups.slice(0, 5);
+  const remainder = groups.slice(5).reduce((sum, group) => sum + group.paid, 0);
+  const items = remainder ? [...top, { name: 'Other', paid: remainder }] : top;
+  let cursor = 0;
+  const gradient = items.map((item, index) => {
+    const start = cursor;
+    cursor += (item.paid / total) * 100;
+    return `${PIE_COLORS[index % PIE_COLORS.length]} ${start}% ${cursor}%`;
+  }).join(', ');
+  return <section className="spending-pie"><header><div><h2>Where money went</h2><p>Outgoing debits only · top five exact names</p></div><strong>{money(total)}</strong></header><div className="pie-content"><div className="pie-visual" style={{ background: `conic-gradient(${gradient})` }}><span><b>{items.length}</b><small>groups</small></span></div><ul>{items.map((item, index) => <li key={item.name}><i style={{ background: PIE_COLORS[index % PIE_COLORS.length] }} /><span title={item.name}>{item.name}</span><b>{money(item.paid)}</b></li>)}</ul></div></section>;
 }
 
 function YearlyUnavailable({ eligibility, onBack, onUpload, onMonthly, onDaily }) {
@@ -89,7 +110,7 @@ export default function YearlyAnalysis({ transactions, onBack, onUpload, onMonth
         <div>
           <div className="eyebrow"><BarChart3 size={15} /> Whole-year activity</div>
           <h1>Yearly analysis</h1>
-          <p>Exact PhonePe names ranked by all money sent and received activity.</p>
+          <p>Exact statement names ranked by all money sent and received activity.</p>
         </div>
         <label className="period-select-label">
           <span>Analysis period</span>
@@ -108,6 +129,8 @@ export default function YearlyAnalysis({ transactions, onBack, onUpload, onMonth
         <article><span className="year-stat-icon mint"><ArrowDownLeft size={19} /></span><div><small>Total received</small><strong>{money(totals.received)}</strong><em>credits & transfers in</em></div></article>
         <article><span className="year-stat-icon sky"><UsersRound size={19} /></span><div><small>People & shops</small><strong>{counterpartyRows.length.toLocaleString('en-IN')}</strong><em>exact names</em></div></article>
       </section>
+
+      <YearlySpendingPie transactions={periodTransactions} />
 
       <section className="yearly-ranking">
         <div className="yearly-ranking-heading"><div><h2>Most frequent people & shops</h2><p>Ranked by transaction count. Paid and received are kept separate.</p></div><span className="ranking-rule"><ShieldCheck size={15} /> Exact names only</span></div>

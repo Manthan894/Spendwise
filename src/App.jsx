@@ -11,6 +11,7 @@ import {
   Cloud,
   Download,
   FileText,
+  FileUp,
   IndianRupee,
   Info,
   Landmark,
@@ -19,29 +20,48 @@ import {
   LogIn,
   LogOut,
   Menu,
+  Moon,
+  PieChart,
   Plus,
   ReceiptText,
+  Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Sun,
   Trash2,
   UploadCloud,
+  UserPen,
   UsersRound,
   WalletCards,
   X,
+  XCircle,
 } from 'lucide-react';
 import YearlyAnalysis from './components/YearlyAnalysis';
-import { parsePhonePePdf } from './lib/parser';
+import {
+  parseSupportedStatementPdf,
+  sourceAppLabel,
+  SUPPORTED_SOURCE_APPS,
+} from './lib/parser';
 import { hasSupabaseConfig, signInWithGoogle, supabase } from './lib/supabase';
 import { productConfig } from './config';
 import {
   clearLocalTransactions,
+  deleteCloudAccount,
   deleteCloudTransactions,
+  fetchCloudProfile,
   fetchCloudTransactions,
   mergeTransactions,
+  readLocalProfile,
   readLocalTransactions,
+  saveCloudProfile,
   saveCloudTransactions,
+  writeLocalProfile,
   writeLocalTransactions,
 } from './lib/storage';
+
+const SOURCE_APPS = SUPPORTED_SOURCE_APPS.map((value) => ({ value, label: sourceAppLabel(value) }));
+const PIE_COLORS = ['#7466e8', '#f39b64', '#4ab48a', '#62a9da', '#d673ad', '#8f86b5'];
 
 const DEMO_TRANSACTIONS = [
   { date: '2026-10-08', time: '08:35 PM', type: 'DEBIT', amountPaise: 1000, counterparty: 'Campus Stationery', transactionId: 'DEMO-1001', description: 'Paid to Campus Stationery' },
@@ -52,117 +72,89 @@ const DEMO_TRANSACTIONS = [
   { date: '2026-10-06', time: '01:24 PM', type: 'DEBIT', amountPaise: 7000, counterparty: 'Lunch Corner', transactionId: 'DEMO-1006', description: 'Paid to Lunch Corner' },
   { date: '2026-09-21', time: '08:10 PM', type: 'DEBIT', amountPaise: 5000, counterparty: 'Riya', transactionId: 'DEMO-1007', description: 'Paid to Riya' },
   { date: '2026-09-18', time: '12:45 PM', type: 'DEBIT', amountPaise: 12000, counterparty: 'Hostel Store', transactionId: 'DEMO-1008', description: 'Paid to Hostel Store' },
-];
+].map((transaction) => ({ ...transaction, sourceApp: 'demo', fingerprint: `demo-${transaction.transactionId.toLowerCase()}`, page: 1 }));
 
-function money(paise, withSign = false) {
+function money(paise) {
   const value = Math.abs(Number(paise || 0)) / 100;
-  const output = new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: value % 1 ? 2 : 0,
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency', currency: 'INR', maximumFractionDigits: value % 1 ? 2 : 0,
   }).format(value);
-  return withSign && paise < 0 ? `−${output}` : output;
 }
 
-function monthKey(date) {
-  return date?.slice(0, 7);
-}
+function monthKey(date) { return date?.slice(0, 7); }
 
 function formatMonth(key) {
   if (!key) return '';
   const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' })
-    .format(new Date(year, month - 1, 1));
-}
-
-function formatShortMonth(key) {
-  const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-IN', { month: 'short', year: '2-digit' })
-    .format(new Date(year, month - 1, 1));
+  return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
 }
 
 function formatDate(date) {
+  if (!date) return 'Date unavailable';
   const [year, month, day] = date.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-    .format(new Date(year, month - 1, day));
+  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(year, month - 1, day));
 }
 
 function formatDateLong(date) {
   const [year, month, day] = date.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-    .format(new Date(year, month - 1, day));
+  return new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(year, month - 1, day));
 }
 
 function totalOf(items, type) {
   return items.filter((item) => item.type === type).reduce((sum, item) => sum + Number(item.amountPaise || 0), 0);
 }
 
+function sortNewest(items) {
+  return [...items].sort((a, b) => `${b.date || ''} ${b.time || ''}`.localeCompare(`${a.date || ''} ${a.time || ''}`));
+}
+
 function groupByCounterparty(items) {
   const groups = new Map();
   for (const item of items) {
     const key = (item.counterparty || 'Unknown counterparty').trim().toLocaleLowerCase();
-    const existing = groups.get(key) || {
-      name: item.counterparty || 'Unknown counterparty', paid: 0, received: 0, count: 0, transactions: [],
+    const group = groups.get(key) || {
+      key, name: item.counterparty || 'Unknown counterparty', paid: 0, received: 0, count: 0, transactions: [],
     };
-    if (item.type === 'DEBIT') existing.paid += Number(item.amountPaise || 0);
-    else existing.received += Number(item.amountPaise || 0);
-    existing.count += 1;
-    existing.transactions.push(item);
-    groups.set(key, existing);
+    if (item.type === 'DEBIT') group.paid += Number(item.amountPaise || 0);
+    else group.received += Number(item.amountPaise || 0);
+    group.count += 1;
+    group.transactions.push(item);
+    groups.set(key, group);
   }
   return [...groups.values()].sort((a, b) => Math.max(b.paid, b.received) - Math.max(a.paid, a.received));
 }
 
-function buildDemoTransactions() {
-  return DEMO_TRANSACTIONS.map((transaction) => ({
-    ...transaction,
-    fingerprint: `demo-${transaction.transactionId.toLowerCase()}`,
-    page: 1,
-  }));
+function sourceLabel(sourceApp) {
+  return sourceApp === 'demo' ? 'Demo' : sourceAppLabel(sourceApp || 'phonepe');
 }
 
 function Logo({ compact = false }) {
-  return (
-    <div className="brand" aria-label="Spendwise">
-      <span className="brand-mark"><WalletCards size={compact ? 17 : 19} strokeWidth={2.4} /></span>
-      {!compact && <span>Spendwise</span>}
-    </div>
-  );
+  return <div className="brand" aria-label="TrackPay"><span className="brand-mark"><WalletCards size={compact ? 17 : 19} strokeWidth={2.4} /></span>{!compact && <span>TrackPay</span>}</div>;
 }
 
 function Toast({ message, onClose }) {
   if (!message) return null;
-  return (
-    <div className={`toast ${message.kind || 'info'}`} role="status">
-      {message.kind === 'error' ? <Info size={18} /> : <CheckCircle2 size={18} />}
-      <span>{message.text}</span>
-      <button onClick={onClose} aria-label="Close message"><X size={16} /></button>
-    </div>
-  );
+  return <div className={`toast ${message.kind || 'info'}`} role="status">{message.kind === 'error' ? <Info size={18} /> : <CheckCircle2 size={18} />}<span>{message.text}</span><button onClick={onClose} aria-label="Close message"><X size={16} /></button></div>;
+}
+
+function SourceBadge({ sourceApp }) {
+  return <span className={`source-badge ${sourceApp || 'phonepe'}`}>{sourceLabel(sourceApp)}</span>;
 }
 
 function UploadPanel({ onFile, parsing, progress, compact = false }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-
-  const acceptFile = (file) => {
-    if (file) onFile(file);
-  };
-
+  const accept = (file) => { if (file) onFile(file); };
   return (
     <section className={`upload-panel ${compact ? 'compact' : ''}`}>
       {!compact && <div className="eyebrow"><Sparkles size={15} /> Private PDF import</div>}
-      <h2>{compact ? 'Add another statement' : 'Upload your PhonePe statement'}</h2>
-      <p>{compact ? 'Import another month or update your records. Duplicate transactions are skipped.' : 'Turn a long statement into a clear view of where your money went.'}</p>
+      <h2>{compact ? 'Import a payment statement' : 'Upload a payment-app statement'}</h2>
+      <p>TrackPay supports original text-based PDFs from PhonePe, GPay, Paytm, and Navi.</p>
       <div
         className={`dropzone ${dragging ? 'dragging' : ''} ${parsing ? 'disabled' : ''}`}
         onDragOver={(event) => { event.preventDefault(); if (!parsing) setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          if (!parsing) acceptFile(event.dataTransfer.files?.[0]);
-        }}
+        onDrop={(event) => { event.preventDefault(); setDragging(false); if (!parsing) accept(event.dataTransfer.files?.[0]); }}
         onClick={() => !parsing && inputRef.current?.click()}
         role="button"
         tabIndex="0"
@@ -170,474 +162,293 @@ function UploadPanel({ onFile, parsing, progress, compact = false }) {
       >
         <span className="upload-orb">{parsing ? <LoaderCircle className="spin" size={25} /> : <UploadCloud size={25} />}</span>
         <strong>{parsing ? `Reading page ${progress.page} of ${progress.total}…` : 'Drop your PDF here'}</strong>
-        <span>{parsing ? 'The file stays in this browser.' : 'or click to choose a file · PDF only'}</span>
-        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => acceptFile(event.target.files?.[0])} hidden />
+        <span>{parsing ? 'Your statement stays on this device.' : 'or click to choose a PDF'}</span>
+        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => accept(event.target.files?.[0])} hidden />
       </div>
-      <div className="privacy-line"><LockKeyhole size={15} /><span>Your original PDF never leaves this device.</span></div>
+      <div className="privacy-line"><LockKeyhole size={15} /><span>The PDF is read locally and is never uploaded or stored.</span></div>
     </section>
   );
 }
 
 function GettingStarted() {
-  return (
-    <aside className="how-card">
-      <div className="section-icon lavender"><CircleHelp size={19} /></div>
-      <div>
-        <h3>How to get your PDF</h3>
-        <p>Download a statement inside PhonePe, then return here to import it.</p>
-      </div>
-      <ol className="steps">
-        <li><span>1</span><div><b>Open PhonePe</b><small>Go to your profile or account section.</small></div></li>
-        <li><span>2</span><div><b>Find “My Statements”</b><small>Select the date range you want to review.</small></div></li>
-        <li><span>3</span><div><b>Download PDF</b><small>Upload the original text-based PDF here.</small></div></li>
-      </ol>
-    </aside>
-  );
+  return <aside className="how-card"><div className="section-icon lavender"><CircleHelp size={19} /></div><div><h3>What to upload</h3><p>Download a statement from a supported app, then return here.</p></div><ol className="steps"><li><span>1</span><div><b>Download the original PDF</b><small>Use PhonePe, GPay, Paytm, or Navi.</small></div></li><li><span>2</span><div><b>Choose the statement</b><small>TrackPay detects the app where possible.</small></div></li><li><span>3</span><div><b>Review before saving</b><small>Nothing saves until you confirm.</small></div></li></ol></aside>;
 }
 
-function Landing({ onFile, parsing, progress, onDemo, canDemo, onLogin, isCloudMode }) {
-  return (
-    <main className="landing shell">
-      <section className="hero-copy">
-        <div className="eyebrow"><Sparkles size={15} /> Money clarity for student life</div>
-        <h1>See where your<br /><em>money goes.</em></h1>
-        <p>Spendwise reads your PhonePe statement on your device and combines repeat payments by person or shop.</p>
-        <div className="trust-row">
-          <span><ShieldCheck size={17} /> PDF stays private</span>
-          <span><Cloud size={17} /> Your data, on every device</span>
-        </div>
-      </section>
-      <div className="landing-action">
-        <UploadPanel onFile={onFile} parsing={parsing} progress={progress} />
-        <GettingStarted />
-        {!isCloudMode && canDemo && (
-          <button className="text-button demo-button" onClick={onDemo}><Sparkles size={16} /> Explore with safe demo data</button>
-        )}
-        {isCloudMode && <button className="text-button demo-button" onClick={onLogin}><LogIn size={16} /> Sign in with Google to save your data</button>}
-      </div>
-    </main>
-  );
+function Landing({ onFile, parsing, progress, onDemo, onLogin, cloudMode }) {
+  return <main className="landing shell"><section className="hero-copy"><div className="eyebrow"><Sparkles size={15} /> Money clarity for student life</div><h1>See where your<br /><em>money goes.</em></h1><p>TrackPay reads supported payment-app statements on your device, then helps you review your spending across devices.</p><div className="trust-row"><span><ShieldCheck size={17} /> PDF stays private</span><span><Cloud size={17} /> Account-scoped sync</span></div></section><div className="landing-action"><UploadPanel onFile={onFile} parsing={parsing} progress={progress} /><GettingStarted /><div className="landing-links"><button className="text-button demo-button" onClick={onDemo}><Sparkles size={16} /> Explore browser-only demo data</button>{cloudMode && <button className="text-button demo-button" onClick={onLogin}><LogIn size={16} /> Continue with Google to save your data</button>}</div></div></main>;
 }
 
 function SummaryCard({ label, value, icon, tone, helper }) {
-  return (
-    <div className={`summary-card ${tone}`}>
-      <div className="summary-icon">{icon}</div>
-      <div><span>{label}</span><strong>{value}</strong>{helper && <small>{helper}</small>}</div>
-    </div>
-  );
+  return <div className={`summary-card ${tone}`}><div className="summary-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong>{helper && <small>{helper}</small>}</div></div>;
 }
 
 function TransactionType({ type }) {
   return <span className={`type-pill ${type === 'CREDIT' ? 'credit' : 'debit'}`}>{type === 'CREDIT' ? <ArrowDownLeft size={13} /> : <ArrowUpRight size={13} />}{type === 'CREDIT' ? 'Credit' : 'Debit'}</span>;
 }
 
+function SpendingPie({ transactions, title = 'Where money went' }) {
+  const groups = groupByCounterparty(transactions.filter((item) => item.type === 'DEBIT'))
+    .filter((group) => group.paid > 0)
+    .sort((a, b) => b.paid - a.paid);
+  const total = groups.reduce((sum, group) => sum + group.paid, 0);
+  if (!total) return <section className="spending-pie empty"><div><PieChart size={22} /></div><p>No outgoing payments are available for this period.</p></section>;
+  const top = groups.slice(0, 5);
+  const remainder = groups.slice(5).reduce((sum, group) => sum + group.paid, 0);
+  const items = remainder ? [...top, { name: 'Other', paid: remainder }] : top;
+  let cursor = 0;
+  const gradient = items.map((item, index) => {
+    const start = cursor;
+    cursor += (item.paid / total) * 100;
+    return `${PIE_COLORS[index % PIE_COLORS.length]} ${start}% ${cursor}%`;
+  }).join(', ');
+  return <section className="spending-pie"><header><div><h2>{title}</h2><p>Outgoing debits only · top five exact names</p></div><strong>{money(total)}</strong></header><div className="pie-content"><div className="pie-visual" style={{ background: `conic-gradient(${gradient})` }}><span><b>{items.length}</b><small>groups</small></span></div><ul>{items.map((item, index) => <li key={item.name}><i style={{ background: PIE_COLORS[index % PIE_COLORS.length] }} /><span title={item.name}>{item.name}</span><b>{money(item.paid)}</b></li>)}</ul></div></section>;
+}
+
 function MonthCard({ month, items, onClick }) {
-  const debit = totalOf(items, 'DEBIT');
-  const credit = totalOf(items, 'CREDIT');
-  return (
-    <button className="month-card" onClick={onClick}>
-      <div className="month-card-top"><span className="calendar-mini"><CalendarDays size={16} /></span><span>{formatMonth(month)}</span><ArrowRight size={17} /></div>
-      <div className="month-total"><span>Paid</span><strong>{money(debit)}</strong></div>
-      <div className="month-meta"><span>{items.length} {items.length === 1 ? 'transaction' : 'transactions'}</span>{credit > 0 && <span className="received-mini">+ {money(credit)} received</span>}</div>
-    </button>
-  );
+  const debit = totalOf(items, 'DEBIT'); const credit = totalOf(items, 'CREDIT');
+  return <button className="month-card" onClick={onClick}><div className="month-card-top"><span className="calendar-mini"><CalendarDays size={16} /></span><span>{formatMonth(month)}</span><ArrowRight size={17} /></div><div className="month-total"><span>Paid</span><strong>{money(debit)}</strong></div><div className="month-meta"><span>{items.length} {items.length === 1 ? 'transaction' : 'transactions'}</span>{credit > 0 && <span className="received-mini">+ {money(credit)} received</span>}</div></button>;
 }
 
 function DayCard({ day, items, onClick }) {
-  const debit = totalOf(items, 'DEBIT');
-  const credit = totalOf(items, 'CREDIT');
-  return (
-    <button className="day-card" onClick={onClick}>
-      <div className="day-card-date"><span>{formatDate(day)}</span><small>{items.length} entries</small></div>
-      <div className="day-card-amount"><strong>{money(debit)}</strong><small>{credit ? `+${money(credit)} in` : 'paid'}</small></div>
-      <ArrowRight size={17} />
-    </button>
-  );
+  const debit = totalOf(items, 'DEBIT'); const credit = totalOf(items, 'CREDIT');
+  return <button className="day-card" onClick={onClick}><div className="day-card-date"><span>{formatDate(day)}</span><small>{items.length} entries</small></div><div className="day-card-amount"><strong>{money(debit)}</strong><small>{credit ? `+${money(credit)} in` : 'paid'}</small></div><ArrowRight size={17} /></button>;
 }
 
-function Overview({ transactions, activeTab, setActiveTab, monthPage, setMonthPage, onMonth, onDay, onYearly, onUpload }) {
+function TransactionTable({ transactions, onOpen, showDate = false, showSource = false }) {
+  return <section className="transaction-table"><div className="transaction-table-head"><span>Transaction details</span><span>Type</span><span>Amount</span><span /></div>{transactions.map((transaction) => <button className="transaction-row" key={transaction.fingerprint} onClick={() => onOpen(transaction)}><div className="transaction-main"><span className={`transaction-icon ${transaction.type === 'CREDIT' ? 'in' : ''}`}>{transaction.type === 'CREDIT' ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}</span><div><strong>{transaction.description || `${transaction.type === 'CREDIT' ? 'Received from' : 'Paid to'} ${transaction.counterparty}`}</strong><small>{showDate ? `${formatDate(transaction.date)} · ` : ''}{transaction.time || 'Time unavailable'}{showSource ? <> · <SourceBadge sourceApp={transaction.sourceApp} /></> : ''}</small></div></div><TransactionType type={transaction.type} /><strong className={transaction.type === 'CREDIT' ? 'amount-credit' : ''}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong><ArrowRight className="row-open" size={17} /></button>)}</section>;
+}
+
+function AllTransactions({ transactions, onOpen }) {
+  const [query, setQuery] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [type, setType] = useState('all');
+  const [source, setSource] = useState('all');
+  const availableSources = [...new Set(transactions.map((item) => item.sourceApp || 'phonepe'))].sort();
+  const filtered = useMemo(() => sortNewest(transactions.filter((item) => {
+    const search = `${item.counterparty || ''} ${item.description || ''} ${item.transactionId || ''} ${item.utr || ''}`.toLocaleLowerCase();
+    return (!query || search.includes(query.toLocaleLowerCase()))
+      && (!from || item.date >= from)
+      && (!to || item.date <= to)
+      && (type === 'all' || item.type === type)
+      && (source === 'all' || (item.sourceApp || 'phonepe') === source);
+  })), [transactions, query, from, to, type, source]);
+  const clear = () => { setQuery(''); setFrom(''); setTo(''); setType('all'); setSource('all'); };
+  return <section className="all-transactions"><div className="section-heading"><div><h2>All transactions</h2><p>Newest first. Search names, descriptions, or reference identifiers.</p></div><strong className="result-count">{filtered.length.toLocaleString('en-IN')} shown</strong></div><div className="filters"><label className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search transactions" /></label><label><span>From</span><input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label><label><span>To</span><input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label><label><span>Type</span><select value={type} onChange={(event) => setType(event.target.value)}><option value="all">All types</option><option value="DEBIT">Debit</option><option value="CREDIT">Credit</option></select></label><label><span>Source app</span><select value={source} onChange={(event) => setSource(event.target.value)}><option value="all">All apps</option>{availableSources.map((app) => <option key={app} value={app}>{sourceLabel(app)}</option>)}</select></label><button className="filter-reset" onClick={clear}><SlidersHorizontal size={15} /> Reset</button></div>{filtered.length ? <TransactionTable transactions={filtered} onOpen={onOpen} showDate showSource /> : <div className="filter-empty"><Search size={21} /><p>No transactions match those filters.</p><button className="text-button" onClick={clear}>Clear filters</button></div>}</section>;
+}
+
+function Dashboard({ transactions, activeTab, onTab, monthPage, setMonthPage, onMonth, onDay, onOpenTransaction, onUpload, displayName, demoMode, onExitDemo }) {
   const monthItems = useMemo(() => {
     const map = new Map();
-    for (const transaction of transactions) {
-      const key = monthKey(transaction.date);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(transaction);
-    }
+    for (const transaction of transactions) { const key = monthKey(transaction.date); if (!map.has(key)) map.set(key, []); map.get(key).push(transaction); }
     return [...map.entries()].sort(([a], [b]) => b.localeCompare(a));
   }, [transactions]);
   const visibleMonths = monthItems.slice(monthPage * 12, (monthPage + 1) * 12);
   const visibleSet = new Set(visibleMonths.map(([key]) => key));
   const dayItems = useMemo(() => {
     const map = new Map();
-    for (const transaction of transactions) {
-      if (!visibleSet.has(monthKey(transaction.date))) continue;
-      if (!map.has(transaction.date)) map.set(transaction.date, []);
-      map.get(transaction.date).push(transaction);
-    }
+    for (const transaction of transactions) { if (visibleSet.has(monthKey(transaction.date))) { if (!map.has(transaction.date)) map.set(transaction.date, []); map.get(transaction.date).push(transaction); } }
     return [...map.entries()].sort(([a], [b]) => b.localeCompare(a));
   }, [transactions, visibleMonths]);
-  const paid = totalOf(transactions, 'DEBIT');
-  const received = totalOf(transactions, 'CREDIT');
+  const paid = totalOf(transactions, 'DEBIT'); const received = totalOf(transactions, 'CREDIT');
   const canShowOlder = (monthPage + 1) * 12 < monthItems.length;
-
-  return (
-    <main className="dashboard shell">
-      <section className="dashboard-heading">
-        <div><div className="eyebrow"><Sparkles size={15} /> Your private overview</div><h1>Good to see you.</h1><p>Every payment, organised without the spreadsheet.</p></div>
-        <button className="primary-button" onClick={onUpload}><Plus size={18} /> Upload statement</button>
-      </section>
-      <section className="summary-grid">
-        <SummaryCard label="Total paid" value={money(paid)} helper="Across imported statements" icon={<ArrowUpRight size={20} />} tone="purple" />
-        <SummaryCard label="Money received" value={money(received)} helper="Credits & transfers in" icon={<ArrowDownLeft size={20} />} tone="green" />
-        <SummaryCard label="Transactions" value={transactions.length.toLocaleString('en-IN')} helper="Duplicates are skipped" icon={<ReceiptText size={20} />} tone="orange" />
-      </section>
-      <section className="data-section">
-        <div className="section-heading">
-          <div><h2>Your statements</h2><p>Only months found in your imported PDFs appear below.</p></div>
-          <div className="segmented three-options" aria-label="Statement grouping">
-            <button className={activeTab === 'monthly' ? 'active' : ''} onClick={() => setActiveTab('monthly')}><CalendarDays size={15} /> Monthly</button>
-            <button className={activeTab === 'daily' ? 'active' : ''} onClick={() => setActiveTab('daily')}><ReceiptText size={15} /> Daily</button>
-            <button onClick={onYearly}><Sparkles size={15} /> Yearly</button>
-          </div>
-        </div>
-        {monthItems.length > 12 && <div className="twelve-note"><Info size={15} /> Showing 12 months at a time. Use the arrows to move through your history.</div>}
-        <div className={activeTab === 'monthly' ? 'months-grid' : 'days-list'}>
-          {activeTab === 'monthly'
-            ? visibleMonths.map(([month, items]) => <MonthCard key={month} month={month} items={items} onClick={() => onMonth(month)} />)
-            : dayItems.map(([day, items]) => <DayCard key={day} day={day} items={items} onClick={() => onDay(day)} />)}
-        </div>
-        {monthItems.length > 12 && <div className="pagination">
-          <button disabled={monthPage === 0} onClick={() => setMonthPage(Math.max(0, monthPage - 1))}><ArrowLeft size={16} /> Newer</button>
-          <span>{monthPage * 12 + 1}–{Math.min((monthPage + 1) * 12, monthItems.length)} of {monthItems.length} months</span>
-          <button disabled={!canShowOlder} onClick={() => setMonthPage(monthPage + 1)}>Older <ArrowRight size={16} /></button>
-        </div>}
-      </section>
-    </main>
-  );
+  return <main className="dashboard shell"><section className="dashboard-heading"><div><div className="eyebrow">{demoMode ? <><Sparkles size={15} /> Browser-only demo</> : <><Sparkles size={15} /> Your private overview</>}</div><h1>{demoMode ? 'Try TrackPay safely.' : `Good to see you${displayName ? `, ${displayName.split(' ')[0]}` : ''}.`}</h1><p>{demoMode ? 'These fictional entries are not saved or mixed with your account.' : 'Every payment, organised without the spreadsheet.'}</p></div>{demoMode ? <button className="secondary-button" onClick={onExitDemo}><X size={17} /> Exit demo</button> : <button className="primary-button" onClick={onUpload}><Plus size={18} /> Upload statement</button>}</section>{demoMode && <div className="demo-banner"><Sparkles size={17} /><span><b>Demo mode:</b> fictional data lives only in this browser session. It never reaches Supabase.</span></div>}<section className="summary-grid"><SummaryCard label="Total paid" value={money(paid)} helper="Across imported statements" icon={<ArrowUpRight size={20} />} tone="purple" /><SummaryCard label="Money received" value={money(received)} helper="Normal received-money entries" icon={<ArrowDownLeft size={20} />} tone="green" /><SummaryCard label="Transactions" value={transactions.length.toLocaleString('en-IN')} helper="Duplicates are skipped" icon={<ReceiptText size={20} />} tone="orange" /></section><section className="data-section"><div className="section-heading dashboard-tabs"><div><h2>{activeTab === 'all' ? 'Your activity' : activeTab === 'daily' ? 'Daily activity' : 'Your statements'}</h2><p>{activeTab === 'all' ? 'Search and filter every imported transaction.' : activeTab === 'daily' ? 'Only days with imported transactions appear below.' : 'Only months found in imported statements appear below.'}</p></div><div className="segmented four-options" aria-label="TrackPay analysis views"><button className={activeTab === 'all' ? 'active' : ''} onClick={() => onTab('all')}><ReceiptText size={15} /> All</button><button className={activeTab === 'monthly' ? 'active' : ''} onClick={() => onTab('monthly')}><CalendarDays size={15} /> Monthly</button><button className={activeTab === 'daily' ? 'active' : ''} onClick={() => onTab('daily')}><CalendarDays size={15} /> Daily</button><button onClick={() => onTab('years')}><PieChart size={15} /> Years</button></div></div>{activeTab === 'all' && <AllTransactions transactions={transactions} onOpen={onOpenTransaction} />}{activeTab !== 'all' && <>{monthItems.length > 12 && <div className="twelve-note"><Info size={15} /> Showing 12 months at a time. Use the arrows to move through your history.</div>}<div className={activeTab === 'monthly' ? 'months-grid' : 'days-list'}>{activeTab === 'monthly' ? visibleMonths.map(([month, items]) => <MonthCard key={month} month={month} items={items} onClick={() => onMonth(month)} />) : dayItems.map(([day, items]) => <DayCard key={day} day={day} items={items} onClick={() => onDay(day)} />)}</div>{monthItems.length > 12 && <div className="pagination"><button disabled={monthPage === 0} onClick={() => setMonthPage(Math.max(0, monthPage - 1))}><ArrowLeft size={16} /> Newer</button><span>{monthPage * 12 + 1}–{Math.min((monthPage + 1) * 12, monthItems.length)} of {monthItems.length} months</span><button disabled={!canShowOlder} onClick={() => setMonthPage(monthPage + 1)}>Older <ArrowRight size={16} /></button></div>}</>}</section></main>;
 }
 
-function BackButton({ onClick, children = 'Back to overview' }) {
-  return <button className="back-button" onClick={onClick}><ArrowLeft size={17} />{children}</button>;
-}
+function BackButton({ onClick, children = 'Back to overview' }) { return <button className="back-button" onClick={onClick}><ArrowLeft size={17} />{children}</button>; }
 
 function MonthlyDetail({ month, transactions, onBack, onTransaction }) {
-  const groups = groupByCounterparty(transactions);
-  const paid = totalOf(transactions, 'DEBIT');
-  const received = totalOf(transactions, 'CREDIT');
-  return (
-    <main className="detail-page shell">
-      <BackButton onClick={onBack} />
-      <header className="detail-heading"><div><div className="eyebrow"><CalendarDays size={15} /> Monthly breakdown</div><h1>{formatMonth(month)}</h1><p>Repeat payments are combined by the same person or shop.</p></div><div className="detail-total"><span>Total paid</span><strong>{money(paid)}</strong>{received > 0 && <small>{money(received)} received</small>}</div></header>
-      <section className="group-list">
-        <div className="group-list-head"><span>Person or shop</span><span>Activity</span><span>Paid</span></div>
-        {groups.map((group) => (
-          <article className="group-row" key={group.name}>
-            <div className="counterparty"><span className="avatar">{group.name.charAt(0).toUpperCase()}</span><div><strong>{group.name}</strong><small>{group.count} {group.count === 1 ? 'transaction' : 'transactions'}</small></div></div>
-            <div className="group-flow">{group.paid > 0 && <span className="outflow"><ArrowUpRight size={14} /> {money(group.paid)}</span>}{group.received > 0 && <span className="inflow"><ArrowDownLeft size={14} /> {money(group.received)}</span>}</div>
-            <strong className="group-paid">{group.paid ? money(group.paid) : '—'}</strong>
-            <button className="row-arrow" aria-label={`View ${group.name} transactions`} onClick={() => onTransaction(group.transactions)}><ChevronDown size={17} /></button>
-          </article>
-        ))}
-      </section>
-      <p className="detail-footnote"><ShieldCheck size={16} /> Names are grouped exactly as they appear in PhonePe. Spendwise does not merge similar-looking names.</p>
-    </main>
-  );
+  const groups = groupByCounterparty(transactions); const paid = totalOf(transactions, 'DEBIT'); const received = totalOf(transactions, 'CREDIT');
+  return <main className="detail-page shell"><BackButton onClick={onBack} /><header className="detail-heading"><div><div className="eyebrow"><CalendarDays size={15} /> Monthly breakdown</div><h1>{formatMonth(month)}</h1><p>Exact payment names are grouped; similar names are never merged.</p></div><div className="detail-total"><span>Total paid</span><strong>{money(paid)}</strong>{received > 0 && <small>{money(received)} received</small>}</div></header><SpendingPie transactions={transactions} /><section className="group-list"><div className="group-list-head"><span>Person or shop</span><span>Activity</span><span>Paid</span><span /></div>{groups.map((group) => <article className="group-row" key={group.key}><div className="counterparty"><span className="avatar">{group.name.charAt(0).toUpperCase()}</span><div><strong>{group.name}</strong><small>{group.count} {group.count === 1 ? 'transaction' : 'transactions'}</small></div></div><div className="group-flow">{group.paid > 0 && <span className="outflow"><ArrowUpRight size={14} /> {money(group.paid)}</span>}{group.received > 0 && <span className="inflow"><ArrowDownLeft size={14} /> {money(group.received)}</span>}</div><strong className="group-paid">{group.paid ? money(group.paid) : '—'}</strong><button className="row-arrow" aria-label={`View ${group.name} transactions`} onClick={() => onTransaction(group.transactions)}><ChevronDown size={17} /></button></article>)}</section><p className="detail-footnote"><ShieldCheck size={16} /> This spending chart counts outgoing debit payments only.</p></main>;
 }
 
 function DailyDetail({ day, transactions, onBack, onOpenTransaction }) {
-  const paid = totalOf(transactions, 'DEBIT');
-  const received = totalOf(transactions, 'CREDIT');
-  return (
-    <main className="detail-page shell">
-      <BackButton onClick={onBack} />
-      <header className="detail-heading"><div><div className="eyebrow"><ReceiptText size={15} /> Daily transactions</div><h1>{formatDateLong(day)}</h1><p>{transactions.length} {transactions.length === 1 ? 'entry' : 'entries'} from your statement.</p></div><div className="detail-total"><span>Paid today</span><strong>{money(paid)}</strong>{received > 0 && <small>{money(received)} received</small>}</div></header>
-      <TransactionTable transactions={transactions} onOpen={onOpenTransaction} />
-    </main>
-  );
-}
-
-function TransactionTable({ transactions, onOpen }) {
-  return (
-    <section className="transaction-table">
-      <div className="transaction-table-head"><span>Transaction details</span><span>Type</span><span>Amount</span><span /></div>
-      {transactions.map((transaction) => (
-        <button className="transaction-row" key={transaction.fingerprint} onClick={() => onOpen(transaction)}>
-          <div className="transaction-main"><span className={`transaction-icon ${transaction.type === 'CREDIT' ? 'in' : ''}`}>{transaction.type === 'CREDIT' ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}</span><div><strong>{transaction.description || (transaction.type === 'CREDIT' ? `Received from ${transaction.counterparty}` : `Paid to ${transaction.counterparty}`)}</strong><small>{transaction.time || 'Time unavailable'}{transaction.utr ? ` · UTR ${transaction.utr}` : ''}</small></div></div>
-          <TransactionType type={transaction.type} />
-          <strong className={transaction.type === 'CREDIT' ? 'amount-credit' : ''}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong>
-          <ArrowRight className="row-open" size={17} />
-        </button>
-      ))}
-    </section>
-  );
+  const paid = totalOf(transactions, 'DEBIT'); const received = totalOf(transactions, 'CREDIT');
+  return <main className="detail-page shell"><BackButton onClick={onBack} /><header className="detail-heading"><div><div className="eyebrow"><ReceiptText size={15} /> Daily transactions</div><h1>{formatDateLong(day)}</h1><p>{transactions.length} {transactions.length === 1 ? 'entry' : 'entries'} from your statements.</p></div><div className="detail-total"><span>Paid today</span><strong>{money(paid)}</strong>{received > 0 && <small>{money(received)} received</small>}</div></header><TransactionTable transactions={sortNewest(transactions)} onOpen={onOpenTransaction} showSource /></main>;
 }
 
 function TransactionDrawer({ transaction, onClose }) {
   if (!transaction) return null;
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section className="transaction-drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <span className={`drawer-icon ${transaction.type === 'CREDIT' ? 'in' : ''}`}>{transaction.type === 'CREDIT' ? <ArrowDownLeft size={22} /> : <ArrowUpRight size={22} />}</span>
-        <TransactionType type={transaction.type} />
-        <h2>{transaction.counterparty}</h2>
-        <strong className={transaction.type === 'CREDIT' ? 'amount-credit big-amount' : 'big-amount'}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong>
-        <dl className="transaction-meta"><div><dt>Date</dt><dd>{formatDate(transaction.date)}</dd></div><div><dt>Time</dt><dd>{transaction.time || 'Not in statement'}</dd></div>{transaction.transactionId && <div><dt>Transaction ID</dt><dd>{transaction.transactionId}</dd></div>}{transaction.utr && <div><dt>UTR number</dt><dd>{transaction.utr}</dd></div>}{transaction.accountLast4 && <div><dt>Account ending</dt><dd>•••• {transaction.accountLast4}</dd></div>}</dl>
-      </section>
-    </div>
-  );
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="transaction-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button><span className={`drawer-icon ${transaction.type === 'CREDIT' ? 'in' : ''}`}>{transaction.type === 'CREDIT' ? <ArrowDownLeft size={22} /> : <ArrowUpRight size={22} />}</span><TransactionType type={transaction.type} /><h2>{transaction.counterparty}</h2><strong className={transaction.type === 'CREDIT' ? 'amount-credit big-amount' : 'big-amount'}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong><dl className="transaction-meta"><div><dt>Date</dt><dd>{formatDate(transaction.date)}</dd></div><div><dt>Time</dt><dd>{transaction.time || 'Not in statement'}</dd></div><div><dt>Source app</dt><dd><SourceBadge sourceApp={transaction.sourceApp} /></dd></div>{transaction.transactionId && <div><dt>Transaction ID</dt><dd>{transaction.transactionId}</dd></div>}{transaction.utr && <div><dt>UTR number</dt><dd>{transaction.utr}</dd></div>}</dl></section></div>;
 }
 
 function GroupTransactionsDrawer({ transactions, onClose, onOpen }) {
   if (!transactions) return null;
   const group = transactions[0];
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section className="transaction-drawer group-drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
-        <div className="eyebrow"><UsersRound size={15} /> All matching entries</div>
-        <h2>{group?.counterparty}</h2>
-        <p>{transactions.length} transactions appear with this exact PhonePe name.</p>
-        <div className="small-transactions">{transactions.map((transaction) => <button key={transaction.fingerprint} onClick={() => onOpen(transaction)}><span><b>{formatDate(transaction.date)}</b><small>{transaction.time || 'Time unavailable'} · {transaction.type}</small></span><strong className={transaction.type === 'CREDIT' ? 'amount-credit' : ''}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong></button>)}</div>
-      </section>
-    </div>
-  );
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="transaction-drawer group-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button><div className="eyebrow"><UsersRound size={15} /> All matching entries</div><h2>{group?.counterparty}</h2><p>{transactions.length} transactions appear with this exact name.</p><div className="small-transactions">{sortNewest(transactions).map((transaction) => <button key={transaction.fingerprint} onClick={() => onOpen(transaction)}><span><b>{formatDate(transaction.date)}</b><small>{transaction.time || 'Time unavailable'} · {sourceLabel(transaction.sourceApp)}</small></span><strong className={transaction.type === 'CREDIT' ? 'amount-credit' : ''}>{transaction.type === 'CREDIT' ? '+' : '−'}{money(transaction.amountPaise)}</strong></button>)}</div></section></div>;
 }
 
-function SupportEmail() {
-  if (productConfig.supportEmailIsPlaceholder) {
-    return <span className="placeholder-email" title="Replace this address before the public launch">{productConfig.supportEmail}</span>;
-  }
-  return <a className="support-email" href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>;
+function SourcePicker({ detection, onSelect, onClose }) {
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="choice-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button><span className="choice-icon"><FileText size={24} /></span><div className="eyebrow"><Info size={15} /> Choose statement source</div><h2>Which app made this statement?</h2><p>TrackPay could not identify it with enough certainty. Selecting the app only chooses a local parser; the PDF is never uploaded.</p>{detection?.app && <p className="detection-hint">Possible match: <b>{sourceAppLabel(detection.app)}</b></p>}<div className="source-choices">{SOURCE_APPS.map((app) => <button key={app.value} onClick={() => onSelect(app.value)}>{app.label}<ArrowRight size={16} /></button>)}</div></section></div>;
 }
 
-function LegalPage({ page, session, onDeleteData, deleting }) {
-  const titles = {
-    privacy: ['Privacy Policy', 'Clear, simple information about how Spendwise handles your data.'],
-    terms: ['Terms of Use', 'The rules for using Spendwise responsibly.'],
-    help: ['Help & Contact', 'Answers about statements, accounts, and your data.'],
-  };
+function ImportReview({ review, onConfirm, onClose, saving }) {
+  const { result, newTransactions, duplicateCount } = review;
+  const { summary } = result;
+  const declared = summary.declared;
+  const hasDeclaredTotals = declared.paidPaise !== null || declared.receivedPaise !== null;
+  return <div className="modal-backdrop" onMouseDown={() => !saving && onClose()}><section className="review-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !saving && onClose()} aria-label="Close"><X size={19} /></button><div className="review-heading"><span className="choice-icon"><CheckCircle2 size={24} /></span><div><div className="eyebrow"><ShieldCheck size={15} /> Review before saving</div><h2>Check this import</h2><p><SourceBadge sourceApp={result.sourceApp} /> {result.detection.confident ? 'Detected locally from the statement format.' : 'Selected manually after local detection was uncertain.'}</p></div></div><div className="review-stats"><article><small>Rows found</small><strong>{summary.rowsFound}</strong></article><article><small>New rows</small><strong>{newTransactions.length}</strong></article><article><small>Duplicates</small><strong>{duplicateCount}</strong></article><article><small>Skipped special rows</small><strong>{summary.skippedRows}</strong></article><article><small>Unreadable rows</small><strong>{summary.unreadableRows}</strong></article></div>{hasDeclaredTotals && <section className={`reconciliation ${summary.totalsComparable && summary.totalsMatch ? 'match' : 'review'}`}><div>{summary.totalsComparable && summary.totalsMatch ? <CheckCircle2 size={19} /> : <Info size={19} />}</div><div><strong>{summary.totalsComparable && summary.totalsMatch ? 'Statement totals match' : 'Statement totals need review'}</strong><p>Statement: paid {declared.paidPaise !== null ? money(declared.paidPaise) : '—'} · received {declared.receivedPaise !== null ? money(declared.receivedPaise) : '—'}<br />Parsed: paid {money(summary.parsed.paidPaise)} · received {money(summary.parsed.receivedPaise)}</p>{!summary.totalsComparable && <small>Special or unreadable rows mean a direct comparison is not available.</small>}</div></section>}{result.issues.length > 0 && <div className="review-warning"><Info size={17} /><span>{result.issues.join(' ')}</span></div>}<section className="review-preview"><div><h3>Preview of new transactions</h3><span>{newTransactions.length ? `Showing first ${Math.min(newTransactions.length, 8)}` : 'No new rows to save'}</span></div>{newTransactions.length ? <div className="review-table">{newTransactions.slice(0, 8).map((item) => <div key={item.fingerprint}><span><b>{formatDate(item.date)}</b><small>{item.counterparty}</small></span><TransactionType type={item.type} /><strong className={item.type === 'CREDIT' ? 'amount-credit' : ''}>{item.type === 'CREDIT' ? '+' : '−'}{money(item.amountPaise)}</strong></div>)}</div> : <p className="no-new-copy">Every readable normal transaction already exists in this account.</p>}</section><div className="review-actions"><button className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" disabled={saving || !newTransactions.length} onClick={onConfirm}>{saving ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />}{saving ? 'Saving…' : newTransactions.length ? `Save ${newTransactions.length} new row${newTransactions.length === 1 ? '' : 's'}` : 'Nothing new to save'}</button></div><p className="review-privacy"><LockKeyhole size={14} /> The original PDF will be discarded after this review. Only confirmed extracted rows are saved.</p></section></div>;
+}
+
+function DisplayNameModal({ initialName, onSave, onClose, saving }) {
+  const [name, setName] = useState(initialName || '');
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="choice-modal small" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button><span className="choice-icon"><UserPen size={24} /></span><div className="eyebrow"><UserPen size={15} /> TrackPay profile</div><h2>Edit display name</h2><p>This changes your TrackPay-only display name. It never changes your Google account name.</p><label className="name-input"><span>Display name</span><input autoFocus maxLength="60" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Priya" /></label><div className="review-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={saving} onClick={() => onSave(name)}>{saving ? <LoaderCircle className="spin" size={17} /> : <CheckCircle2 size={17} />}Save name</button></div></section></div>;
+}
+
+function DeleteAccountModal({ onDelete, onClose, deleting }) {
+  const [confirmation, setConfirmation] = useState('');
+  return <div className="modal-backdrop" onMouseDown={() => !deleting && onClose()}><section className="choice-modal danger-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !deleting && onClose()} aria-label="Close"><X size={19} /></button><span className="choice-icon danger"><Trash2 size={24} /></span><div className="eyebrow"><Info size={15} /> Permanent action</div><h2>Delete TrackPay account?</h2><p>This permanently deletes your TrackPay profile, saved transactions, and Supabase sign-in identity. It does not delete your Google account.</p><label className="name-input"><span>Type <b>DELETE</b> to continue</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><button className="danger-button full-button" disabled={confirmation !== 'DELETE' || deleting} onClick={onDelete}>{deleting ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}{deleting ? 'Deleting account…' : 'Permanently delete account'}</button></section></div>;
+}
+
+function SupportEmail() { return productConfig.supportEmailIsPlaceholder ? <span className="placeholder-email" title="Replace this address before public launch">{productConfig.supportEmail}</span> : <a className="support-email" href={`mailto:${productConfig.supportEmail}`}>{productConfig.supportEmail}</a>; }
+
+function LegalPage({ page, session, onDeleteData, deletingData, onAccountDelete }) {
+  const titles = { privacy: ['Privacy Policy', 'Clear information about how TrackPay handles statement data.'], terms: ['Terms of Use', 'The rules for using TrackPay responsibly.'], help: ['Help & Contact', 'Answers about imports, accounts, and your data.'] };
   const [title, subtitle] = titles[page] || titles.privacy;
-
-  return (
-    <main className="legal-page shell">
-      <a className="back-button" href="/"><ArrowLeft size={17} />Back to Spendwise</a>
-      <header className="legal-heading">
-        <div className="eyebrow"><ShieldCheck size={15} /> Spendwise information centre</div>
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
-        <small>Last updated: {productConfig.policyLastUpdated}</small>
-      </header>
-
-      {page === 'privacy' && <div className="legal-content">
-        <section><h2>1. Who we are</h2><p>Spendwise is an independent student project that helps people organise transactions from PhonePe statements. In this policy, “we”, “us”, and “Spendwise” mean {productConfig.policyOwner}.</p></section>
-        <section><h2>2. Your statement PDF stays on your device</h2><p>Spendwise reads an original, text-based PhonePe PDF inside your browser. The PDF file itself is not uploaded to our server, Supabase, AWS Amplify, or another storage service. We do not keep a copy of the PDF.</p></section>
-        <section><h2>3. Information saved after you sign in</h2><p>When you choose to import a statement while signed in, Spendwise may save extracted transaction fields: date, time, debit or credit type, amount, counterparty name, transaction ID, UTR number, masked account suffix, and the imported file name. We use basic Google account information supplied through Google Sign-In, such as your email address and profile name, to identify your account.</p></section>
-        <section><h2>4. Why we use this information</h2><p>We use this information only to show your transaction history, monthly groups, daily details, duplicate protection, and cross-device access for your signed-in Spendwise account. Spendwise does not request access to your Gmail, Google Drive, contacts, calendar, or other Google data.</p></section>
-        <section><h2>5. Where data is kept and protected</h2><p>Extracted transaction data is stored in Supabase after sign-in. Our database rules are designed so that each signed-in user can access only their own transaction rows. The Spendwise web interface is hosted through AWS Amplify. No online service can promise absolute security, but we use account-based access controls and Row Level Security to reduce unauthorised access.</p></section>
-        <section><h2>6. Your choices and deletion</h2><p>You can delete all imported transaction records from inside your signed-in Spendwise account. This removes stored transaction rows but does not delete your Google account itself. For an account-deletion request or questions about your data, contact <SupportEmail />.</p>{productConfig.supportEmailIsPlaceholder && <p className="temporary-note"><Info size={15} /> A dedicated support address is being prepared. This placeholder must be replaced before public launch.</p>}</section>
-        <section><h2>7. Sharing and selling</h2><p>Spendwise does not sell personal data or transaction data. We do not intentionally share transaction data with advertisers. Service providers used to operate the app, such as Supabase and AWS Amplify, process only what is needed to provide the service.</p></section>
-        <section><h2>8. Changes to this policy</h2><p>We may update this policy as Spendwise develops. The latest version will be available on this page with an updated date.</p></section>
-      </div>}
-
-      {page === 'terms' && <div className="legal-content">
-        <section><h2>1. Using Spendwise</h2><p>Spendwise is intended to help students organise their own PhonePe statement transactions. Use it only with statements you are authorised to access. Do not upload another person’s statement without their clear permission.</p></section>
-        <section><h2>2. What Spendwise does</h2><p>Spendwise extracts text from supported PhonePe PDF statements, shows individual transactions, and groups exact matching counterparty names. It does not provide financial, tax, legal, investment, or banking advice.</p></section>
-        <section><h2>3. Accuracy and review</h2><p>PDF layouts and names can vary. You should review your imported data before relying on it. Spendwise does not merge similar-looking names and should not be treated as an official PhonePe record.</p></section>
-        <section><h2>4. Your account</h2><p>You sign in through Google. Keep control of your Google account and sign out from shared devices. You are responsible for activity performed through your account.</p></section>
-        <section><h2>5. Availability</h2><p>Spendwise is an evolving student project and may change, be paused, or be unavailable from time to time. We may update or remove features as the product develops.</p></section>
-        <section><h2>6. Privacy and deletion</h2><p>Our handling of statement data is explained in the <a href="?page=privacy">Privacy Policy</a>. You can remove imported transactions from within the product. For account-deletion questions, contact <SupportEmail />.</p></section>
-        <section><h2>7. Contact</h2><p>Questions about these terms can be sent to <SupportEmail />.</p></section>
-      </div>}
-
-      {page === 'help' && <div className="legal-content help-content">
-        <section><h2>How do I import a PhonePe statement?</h2><ol><li>Open PhonePe and find your statements or transaction history.</li><li>Choose the date range and download the original PDF.</li><li>Sign in to Spendwise with Google, then upload the PDF.</li><li>Wait for Spendwise to read the transaction text on your device.</li></ol><p>Image-only PDFs, screenshots, and scanned pages cannot be read reliably yet.</p></section>
-        <section><h2>Does Spendwise upload my PDF?</h2><p>No. The PDF is read in your browser. Only extracted transaction fields are saved after you sign in, so your account can show the same data on another device.</p></section>
-        <section><h2>Why is a transaction missing or grouped separately?</h2><p>Spendwise groups only exact PhonePe names. For example, “Friend-1” and “Friend-1K” remain separate. A statement with no selectable text may also need the original PhonePe PDF rather than a scan.</p></section>
-        <section className="data-control"><h2>Manage your imported data</h2><p>Deleting imported data permanently removes all transaction records stored for your signed-in Spendwise account. It does not delete your Google account.</p>{session ? <button className="danger-button" disabled={deleting} onClick={onDeleteData}>{deleting ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}{deleting ? 'Deleting imported data…' : 'Delete all imported data'}</button> : <p className="signin-note"><LockKeyhole size={15} /> Sign in to manage imported data.</p>}<p className="support-copy">For an account-deletion request or support, contact <SupportEmail />.</p>{productConfig.supportEmailIsPlaceholder && <p className="temporary-note"><Info size={15} /> This address is temporary and will be replaced before public launch.</p>}</section>
-        <section><h2>Contact</h2><p>Need help? Contact <SupportEmail />. We aim to add a dedicated support address before Spendwise is opened to the public.</p></section>
-      </div>}
-    </main>
-  );
+  return <main className="legal-page shell"><a className="back-button" href="/"><ArrowLeft size={17} />Back to TrackPay</a><header className="legal-heading"><div className="eyebrow"><ShieldCheck size={15} /> TrackPay information centre</div><h1>{title}</h1><p>{subtitle}</p><small>Last updated: {productConfig.policyLastUpdated}</small></header>{page === 'privacy' && <div className="legal-content"><section><h2>1. Your statement PDF stays on your device</h2><p>TrackPay reads supported original, text-based PDFs from PhonePe, GPay, Paytm, and Navi in your browser. The original PDF is never uploaded to Supabase, hosting, or another storage service.</p></section><section><h2>2. Data saved after confirmation</h2><p>After you review and confirm an import, TrackPay may save extracted normal transaction data: source app, date, time, debit or credit type, amount, counterparty, transaction identifier, and description. TrackPay does not save the original PDF or its file name.</p></section><section><h2>3. Account isolation</h2><p>Signed-in data is stored in Supabase with account-scoped Row Level Security. We use Google Sign-In only to identify your TrackPay account. TrackPay does not access Gmail, Drive, contacts, calendar, or live payment-app data.</p></section><section><h2>4. Your choices</h2><p>You can clear all saved transaction records or permanently delete your TrackPay account. Account deletion removes the TrackPay sign-in identity and saved TrackPay data; it does not delete your Google account.</p></section><section><h2>5. Limits</h2><p>TrackPay cannot make payments, link to a live payment app, or track transactions in real time. It supports recognised statement layouts and asks for review before saving.</p></section></div>}{page === 'terms' && <div className="legal-content"><section><h2>1. Use your own statements</h2><p>Use TrackPay only with payment-app statements you are authorised to access. Do not import someone else’s data without clear permission.</p></section><section><h2>2. Accuracy and review</h2><p>Layouts can change. TrackPay reads recognised PDF formats, shows an import review, and does not merge similar-looking names. Review your data before relying on it.</p></section><section><h2>3. What TrackPay includes</h2><p>TrackPay organises normal completed payments and normal received-money transactions. It intentionally skips refunds, reversals, cashbacks, self transfers, failed payments, and pending payments.</p></section><section><h2>4. No financial advice</h2><p>TrackPay is a personal organisation tool, not a bank, payment service, or source of tax, legal, or financial advice.</p></section></div>}{page === 'help' && <div className="legal-content help-content"><section><h2>How do I import a statement?</h2><ol><li>Download an original text-based PDF in PhonePe, GPay, Paytm, or Navi.</li><li>Sign in with Google if cloud sync is enabled.</li><li>Upload it to TrackPay; detection and parsing happen in your browser.</li><li>Check the source app, counts, and preview, then confirm saving.</li></ol><p>Scanned PDFs and screenshots cannot be read reliably. Navi statements are imported for outgoing payments only because its user export does not provide received-money entries.</p></section><section><h2>Does TrackPay upload my PDF?</h2><p>No. TrackPay parses the PDF locally. The original file is discarded when you close or finish the review.</p></section><section className="data-control"><h2>Manage saved data</h2>{session ? <><p>Clear-data removes saved transaction rows but keeps your TrackPay account. Account deletion permanently removes both the saved data and TrackPay account identity.</p><div className="legal-actions"><button className="danger-button" disabled={deletingData} onClick={onDeleteData}>{deletingData ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}{deletingData ? 'Deleting saved data…' : 'Clear saved transaction data'}</button><button className="text-button delete-link" onClick={onAccountDelete}>Delete TrackPay account</button></div></> : <p className="signin-note"><LockKeyhole size={15} /> Sign in to manage cloud-saved data.</p>}</section><section><h2>Contact</h2><p>Need help? Contact <SupportEmail />.</p></section></div>}</main>;
 }
 
-function Footer() {
-  return <footer><Logo /><span>Private by design. Built for student spending clarity.</span><nav className="footer-links"><a href="?page=privacy">Privacy</a><a href="?page=terms">Terms</a><a href="?page=help">Help & Contact</a></nav><span>© {new Date().getFullYear()} Spendwise</span></footer>;
-}
+function Footer() { return <footer><Logo /><span>Private by design. Built for student spending clarity.</span><nav className="footer-links"><a href="?page=privacy">Privacy</a><a href="?page=terms">Terms</a><a href="?page=help">Help & Contact</a></nav><span>© {new Date().getFullYear()} TrackPay</span></footer>; }
 
-function Header({ session, onLogin, onLogout, cloudMode }) {
-  const name = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0];
-  return <header className="site-header"><div className="header-inner"><a href="/" aria-label="Spendwise home"><Logo /></a><nav><a href="?page=privacy">Privacy</a><a href="?page=help">How it works</a></nav><div className="header-actions">{session ? <><span className="user-chip">{session.user.user_metadata?.avatar_url ? <img src={session.user.user_metadata.avatar_url} alt="" /> : <span>{name?.charAt(0)?.toUpperCase()}</span>}{name}</span><button className="icon-button" onClick={onLogout} title="Sign out"><LogOut size={18} /></button></> : cloudMode ? <button className="login-button" onClick={onLogin}><LogIn size={17} /> Continue with Google</button> : <span className="local-chip"><Landmark size={14} /> Local preview</span>}<a className="mobile-menu" href="?page=help" aria-label="Open help and information"><Menu size={19} /></a></div></div></header>;
-}
-
-function PrivacyModal({ onClose }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="privacy-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button><span className="privacy-shield"><ShieldCheck size={26} /></span><h2>Your statement remains private</h2><p>Spendwise reads the PDF with code running in your browser. The file is not uploaded, stored, or shared.</p><div className="privacy-points"><span><CheckCircle2 size={17} /> PDF parsing happens on-device</span><span><CheckCircle2 size={17} /> Only extracted transaction fields sync after you sign in</span><span><CheckCircle2 size={17} /> Supabase row-level security isolates each account</span></div><button className="primary-button full-button" onClick={onClose}>Got it</button></section></div>;
+function Header({ session, displayName, onLogin, onLogout, cloudMode, theme, onTheme, onEditName, onClearData, onDeleteAccount, demoMode, onExitDemo }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const googleName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Account';
+  const name = displayName || (session ? googleName : 'Local profile');
+  const profileMenu = (local = false) => <div className="profile-menu"><div><small>{local ? 'Local browser profile' : 'Signed in as'}</small><strong>{local ? 'Cloud sync is not configured' : session.user.email}</strong></div><button onClick={() => { setMenuOpen(false); onEditName(); }}><UserPen size={16} /> Edit TrackPay name</button><button onClick={() => { setMenuOpen(false); onTheme(); }}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}{theme === 'dark' ? 'Use light mode' : 'Use dark mode'}</button><button onClick={() => { setMenuOpen(false); onClearData(); }}><Trash2 size={16} /> Clear saved data</button>{!local && <><button className="profile-danger" onClick={() => { setMenuOpen(false); onDeleteAccount(); }}><XCircle size={16} /> Delete account</button><button onClick={() => { setMenuOpen(false); onLogout(); }}><LogOut size={16} /> Sign out</button></>}</div>;
+  return <header className="site-header"><div className="header-inner"><a href="/" aria-label="TrackPay home"><Logo /></a><nav><a href="?page=privacy">Privacy</a><a href="?page=help">How it works</a></nav><div className="header-actions">{demoMode && <button className="demo-chip" onClick={onExitDemo}><Sparkles size={14} /> Demo · exit</button>}<button className="theme-button" onClick={onTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>{session ? <div className="profile-wrap"><button className="user-chip" onClick={() => setMenuOpen(!menuOpen)}>{session.user.user_metadata?.avatar_url ? <img src={session.user.user_metadata.avatar_url} alt="" /> : <span>{name.charAt(0).toUpperCase()}</span>}{name}<ChevronDown size={14} /></button>{menuOpen && profileMenu()}</div> : cloudMode ? <button className="login-button" onClick={onLogin}><LogIn size={17} /> Continue with Google</button> : <div className="profile-wrap"><button className="local-chip user-chip" onClick={() => setMenuOpen(!menuOpen)}><span>{name.charAt(0).toUpperCase()}</span>{name}<ChevronDown size={14} /></button>{menuOpen && profileMenu(true)}</div>}<a className="mobile-menu" href="?page=help" aria-label="Open help"><Menu size={19} /></a></div></div></header>;
 }
 
 function App() {
   const [session, setSession] = useState(null);
   const [transactions, setTransactions] = useState(() => hasSupabaseConfig ? [] : readLocalTransactions());
+  const [displayName, setDisplayName] = useState(() => readLocalProfile().displayName || '');
+  const [theme, setTheme] = useState(() => localStorage.getItem('trackpay:theme') || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   const [parsing, setParsing] = useState(false);
   const [progress, setProgress] = useState({ page: 0, total: 0 });
   const [toast, setToast] = useState(null);
-  const [activeTab, setActiveTab] = useState('monthly');
-  const [view, setView] = useState('overview');
+  const [activeTab, setActiveTab] = useState('all');
+  const [view, setView] = useState('dashboard');
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [monthPage, setMonthPage] = useState(0);
   const [showUpload, setShowUpload] = useState(false);
+  const [sourcePicker, setSourcePicker] = useState(null);
+  const [importReview, setImportReview] = useState(null);
+  const [savingImport, setSavingImport] = useState(false);
   const [transactionDrawer, setTransactionDrawer] = useState(null);
   const [groupDrawer, setGroupDrawer] = useState(null);
   const [deletingData, setDeletingData] = useState(false);
+  const [showNameEditor, setShowNameEditor] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const [showAccountDelete, setShowAccountDelete] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
-  const notify = (text, kind = 'success') => {
-    setToast({ text, kind });
-    window.setTimeout(() => setToast(null), 4800);
-  };
+  const notify = (text, kind = 'success') => { setToast({ text, kind }); window.setTimeout(() => setToast(null), 5000); };
+  const dataTransactions = demoMode ? DEMO_TRANSACTIONS : transactions;
+
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('trackpay:theme', theme); }, [theme]);
 
   useEffect(() => {
     if (!supabase) return undefined;
     let alive = true;
-    const loadSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (alive) setSession(data.session);
-      if (data.session) {
-        try {
-          const cloudTransactions = await fetchCloudTransactions();
-          if (alive) setTransactions(cloudTransactions);
-        } catch (error) {
-          if (alive) notify(`Could not load cloud data: ${error.message}`, 'error');
-        }
+    const loadAccount = async (activeSession) => {
+      if (!activeSession) return;
+      try {
+        const [cloudTransactions, profile] = await Promise.all([fetchCloudTransactions(), fetchCloudProfile()]);
+        if (!alive) return;
+        setTransactions(cloudTransactions);
+        setDisplayName(profile?.displayName || '');
+      } catch (error) {
+        if (alive) notify(`Could not load TrackPay cloud data: ${error.message}`, 'error');
       }
     };
-    loadSession();
+    supabase.auth.getSession().then(({ data }) => { if (alive) { setSession(data.session); loadAccount(data.session); } });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      if (!newSession) {
-        setTransactions([]);
-        setView('overview');
-      } else {
-        window.setTimeout(async () => {
-          try { if (alive) setTransactions(await fetchCloudTransactions()); } catch (error) { if (alive) notify(`Could not load cloud data: ${error.message}`, 'error'); }
-        }, 0);
-      }
+      if (!newSession) { setTransactions([]); setDisplayName(''); setView('dashboard'); }
+      else window.setTimeout(() => loadAccount(newSession), 0);
     });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const onLogin = async () => {
-    try { await signInWithGoogle(); } catch (error) { notify(error.message, 'error'); }
-  };
+  const onLogin = async () => { try { await signInWithGoogle(); } catch (error) { notify(error.message, 'error'); } };
+  const onLogout = async () => { if (!supabase) return; await supabase.auth.signOut(); notify('Signed out. Your TrackPay data remains securely stored.'); };
+  const toggleTheme = () => setTheme((current) => current === 'dark' ? 'light' : 'dark');
 
-  const onLogout = async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
-    notify('Signed out. Your cloud data remains securely stored.', 'success');
-  };
-
-  const saveNewTransactions = async (incoming, sourceFileName) => {
-    const merged = mergeTransactions(transactions, incoming);
-    setTransactions(merged.transactions);
-    if (hasSupabaseConfig && session) {
-      await saveCloudTransactions(session.user.id, incoming, sourceFileName);
-    } else {
-      writeLocalTransactions(merged.transactions);
-    }
-    return merged.added;
-  };
-
-  const onFile = async (file) => {
+  const submitForReview = async (file, forcedSourceApp) => {
     if (!file || parsing) return;
-    if (hasSupabaseConfig && !session) {
-      notify('Please continue with Google before importing, so your transactions stay tied to your account.', 'error');
-      return;
-    }
-    setParsing(true);
-    setProgress({ page: 0, total: 0 });
+    if (demoMode) { notify('Exit demo mode before importing a personal statement.', 'error'); return; }
+    if (hasSupabaseConfig && !session) { notify('Continue with Google before importing so your transactions stay tied to your account.', 'error'); return; }
+    setParsing(true); setProgress({ page: 0, total: 0 });
     try {
-      const result = await parsePhonePePdf(file, setProgress);
-      const added = await saveNewTransactions(result.transactions, file.name);
+      const result = await parseSupportedStatementPdf(file, { sourceApp: forcedSourceApp, onProgress: setProgress });
+      if (result.requiresAppChoice && !forcedSourceApp) { setShowUpload(false); setSourcePicker({ file, detection: result.detection }); return; }
+      const existingFingerprints = new Set(transactions.map((item) => item.fingerprint));
+      const newTransactions = result.transactions.filter((item) => !existingFingerprints.has(item.fingerprint));
       setShowUpload(false);
-      setView('overview');
-      const duplicateText = result.transactions.length - added;
-      notify(`${added} ${added === 1 ? 'transaction' : 'transactions'} imported${duplicateText ? ` · ${duplicateText} duplicate${duplicateText === 1 ? '' : 's'} skipped` : ''}.`);
-      if (result.issues.length) notify(`${added} imported. ${result.issues[0]}`, 'error');
-    } catch (error) {
-      notify(error.message || 'We could not read that file.', 'error');
-    } finally {
-      setParsing(false);
-      setProgress({ page: 0, total: 0 });
-    }
+      setImportReview({ result, newTransactions, duplicateCount: result.transactions.length - newTransactions.length });
+    } catch (error) { notify(error.message || 'We could not read that file.', 'error'); }
+    finally { setParsing(false); setProgress({ page: 0, total: 0 }); }
   };
 
-  const onDemo = async () => {
-    const demo = buildDemoTransactions();
-    const merged = mergeTransactions(transactions, demo);
-    setTransactions(merged.transactions);
-    writeLocalTransactions(merged.transactions);
-    notify('Demo data loaded. It is generic and stored only in this browser.');
+  const confirmImport = async () => {
+    if (!importReview || !importReview.newTransactions.length) return;
+    setSavingImport(true);
+    try {
+      const merged = mergeTransactions(transactions, importReview.newTransactions);
+      if (hasSupabaseConfig && session) await saveCloudTransactions(session.user.id, importReview.newTransactions);
+      else writeLocalTransactions(merged.transactions);
+      setTransactions(merged.transactions);
+      setImportReview(null); setView('dashboard'); setActiveTab('all');
+      notify(`${merged.added} ${merged.added === 1 ? 'transaction' : 'transactions'} saved to TrackPay.`);
+    } catch (error) { notify(`Could not save imported data: ${error.message}`, 'error'); }
+    finally { setSavingImport(false); }
   };
 
-  const selectedTransactions = useMemo(() => {
-    if (view === 'month') return transactions.filter((transaction) => monthKey(transaction.date) === selectedMonth);
-    if (view === 'day') return transactions.filter((transaction) => transaction.date === selectedDay);
-    return [];
-  }, [transactions, view, selectedMonth, selectedDay]);
-
-  const eraseLocalPreview = () => {
-    if (!window.confirm('Remove every locally stored preview transaction from this browser?')) return;
-    clearLocalTransactions();
-    setTransactions([]);
-    setView('overview');
-    notify('Local preview data removed.');
+  const onDemo = () => { setDemoMode(true); setView('dashboard'); setActiveTab('all'); setMonthPage(0); };
+  const exitDemo = () => { setDemoMode(false); setView('dashboard'); setMonthPage(0); };
+  const saveDisplayName = async (name) => {
+    setSavingName(true);
+    try {
+      if (hasSupabaseConfig && session) await saveCloudProfile(session.user.id, name);
+      else writeLocalProfile({ displayName: name });
+      setDisplayName(String(name || '').trim()); setShowNameEditor(false); notify('Your TrackPay display name was saved.');
+    } catch (error) { notify(`Could not save display name: ${error.message}`, 'error'); }
+    finally { setSavingName(false); }
   };
-
-  const deleteAllImportedData = async () => {
-    const message = hasSupabaseConfig
-      ? 'Delete every imported transaction from your Spendwise account? This cannot be undone.'
-      : 'Delete every locally stored preview transaction from this browser? This cannot be undone.';
+  const clearData = async () => {
+    if (demoMode) { exitDemo(); notify('Demo mode exited. No demo data was saved.'); return; }
+    const message = hasSupabaseConfig ? 'Delete every saved transaction from your TrackPay account? This cannot be undone.' : 'Delete every locally stored TrackPay transaction from this browser? This cannot be undone.';
     if (!window.confirm(message)) return;
     setDeletingData(true);
     try {
-      if (hasSupabaseConfig && session) {
-        await deleteCloudTransactions(session.user.id);
-      } else {
-        clearLocalTransactions();
-      }
-      setTransactions([]);
-      setView('overview');
-      notify('Your imported transaction data has been deleted.');
-    } catch (error) {
-      notify(`Could not delete imported data: ${error.message}`, 'error');
-    } finally {
-      setDeletingData(false);
-    }
+      if (hasSupabaseConfig && session) await deleteCloudTransactions(session.user.id); else clearLocalTransactions();
+      setTransactions([]); setView('dashboard'); notify('Your saved transaction data was deleted.');
+    } catch (error) { notify(`Could not delete saved data: ${error.message}`, 'error'); }
+    finally { setDeletingData(false); }
+  };
+  const deleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await deleteCloudAccount();
+      setTransactions([]); setDisplayName(''); setShowAccountDelete(false); setSession(null); setView('dashboard');
+      notify('Your TrackPay account and saved data were permanently deleted.');
+    } catch (error) { notify(`Could not delete account: ${error.message}. Make sure the secured delete-account Edge Function is deployed.`, 'error'); }
+    finally { setDeletingAccount(false); }
   };
 
+  const selectedTransactions = useMemo(() => {
+    if (view === 'month') return dataTransactions.filter((transaction) => monthKey(transaction.date) === selectedMonth);
+    if (view === 'day') return dataTransactions.filter((transaction) => transaction.date === selectedDay);
+    return [];
+  }, [dataTransactions, view, selectedMonth, selectedDay]);
   const requestedLegalPage = new URLSearchParams(window.location.search).get('page');
   const legalPage = ['privacy', 'terms', 'help'].includes(requestedLegalPage) ? requestedLegalPage : null;
-  const hasData = transactions.length > 0;
+  const hasData = dataTransactions.length > 0;
+  const setTab = (tab) => { if (tab === 'years') setView('yearly'); else { setActiveTab(tab); setView('dashboard'); } };
 
-  return (
-    <div className="app-shell">
-      <Header session={session} onLogin={onLogin} onLogout={onLogout} cloudMode={hasSupabaseConfig} />
-      {!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Preview mode:</b> add Supabase environment variables to enable Google sign-in and encrypted account-based sync.</span>{hasData && <button onClick={eraseLocalPreview}><Trash2 size={14} /> Clear local data</button>}</div>}
-      {legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={deleteAllImportedData} deleting={deletingData} /> : <>
-        {!hasData && !showUpload ? <Landing onFile={onFile} parsing={parsing} progress={progress} onDemo={onDemo} canDemo={!hasSupabaseConfig} onLogin={onLogin} isCloudMode={hasSupabaseConfig} /> : <>
-          {view === 'overview' && <Overview transactions={transactions} activeTab={activeTab} setActiveTab={setActiveTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onYearly={() => setView('yearly')} onUpload={() => setShowUpload(true)} />}
-          {view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('overview')} onTransaction={(items) => setGroupDrawer(items)} />}
-          {view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('overview')} onOpenTransaction={setTransactionDrawer} />}
-          {view === 'yearly' && <YearlyAnalysis transactions={transactions} onBack={() => setView('overview')} onUpload={() => setShowUpload(true)} onMonthly={() => { setActiveTab('monthly'); setView('overview'); }} onDaily={() => { setActiveTab('daily'); setView('overview'); }} onOpenGroup={setGroupDrawer} />}
-        </>}
-      </>}
-      {showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={onFile} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}
-      <TransactionDrawer transaction={transactionDrawer} onClose={() => setTransactionDrawer(null)} />
-      <GroupTransactionsDrawer transactions={groupDrawer} onClose={() => setGroupDrawer(null)} onOpen={(transaction) => { setGroupDrawer(null); setTransactionDrawer(transaction); }} />
-      <Toast message={toast} onClose={() => setToast(null)} />
-      <Footer />
-    </div>
-  );
+  return <div className="app-shell"><Header session={session} displayName={displayName} onLogin={onLogin} onLogout={onLogout} cloudMode={hasSupabaseConfig} theme={theme} onTheme={toggleTheme} onEditName={() => setShowNameEditor(true)} onClearData={clearData} onDeleteAccount={() => setShowAccountDelete(true)} demoMode={demoMode} onExitDemo={exitDemo} />{!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Local development:</b> cloud sync is off. Imports stay only in this browser until Supabase is configured.</span>{transactions.length > 0 && !demoMode && <button onClick={clearData}><Trash2 size={14} /> Clear local data</button>}</div>}{legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={clearData} deletingData={deletingData} onAccountDelete={() => setShowAccountDelete(true)} /> : <>{!hasData && !showUpload ? <Landing onFile={submitForReview} parsing={parsing} progress={progress} onDemo={onDemo} onLogin={onLogin} cloudMode={hasSupabaseConfig} /> : <>{view === 'dashboard' && <Dashboard transactions={dataTransactions} activeTab={activeTab} onTab={setTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onOpenTransaction={setTransactionDrawer} onUpload={() => setShowUpload(true)} displayName={displayName} demoMode={demoMode} onExitDemo={exitDemo} />}{view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('dashboard')} onTransaction={setGroupDrawer} />}{view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('dashboard')} onOpenTransaction={setTransactionDrawer} />}{view === 'yearly' && <YearlyAnalysis transactions={dataTransactions} onBack={() => setView('dashboard')} onUpload={() => demoMode ? exitDemo() : setShowUpload(true)} onMonthly={() => setTab('monthly')} onDaily={() => setTab('daily')} onOpenGroup={setGroupDrawer} />}</>}</>}<Footer />{showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={submitForReview} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}{sourcePicker && <SourcePicker detection={sourcePicker.detection} onClose={() => setSourcePicker(null)} onSelect={(sourceApp) => { const { file } = sourcePicker; setSourcePicker(null); submitForReview(file, sourceApp); }} />}{importReview && <ImportReview review={importReview} onConfirm={confirmImport} onClose={() => setImportReview(null)} saving={savingImport} />}{showNameEditor && <DisplayNameModal initialName={displayName} onSave={saveDisplayName} onClose={() => setShowNameEditor(false)} saving={savingName} />}{showAccountDelete && <DeleteAccountModal onDelete={deleteAccount} onClose={() => setShowAccountDelete(false)} deleting={deletingAccount} />}{transactionDrawer && <TransactionDrawer transaction={transactionDrawer} onClose={() => setTransactionDrawer(null)} />}{groupDrawer && <GroupTransactionsDrawer transactions={groupDrawer} onClose={() => setGroupDrawer(null)} onOpen={(transaction) => { setGroupDrawer(null); setTransactionDrawer(transaction); }} />}<Toast message={toast} onClose={() => setToast(null)} /></div>;
 }
 
 export default App;
