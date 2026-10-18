@@ -716,3 +716,10 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
 .signed-in-import-note svg { flex: 0 0 auto; }
 .logout-modal .choice-icon { color: #6256d7; background: #eae7ff; }
 :root[data-theme='dark'] .signed-in-import-note { color: #8ed7b6; background: #243b34; border-color: #38584c; }
+
+/* Onboarding navigation */
+.landing-back { margin-bottom: 27px; }
+.landing-back + .eyebrow { margin-top: 0; }
+@media (max-width: 860px) {
+  .landing-back { margin-left: auto; margin-right: auto; }
+}
