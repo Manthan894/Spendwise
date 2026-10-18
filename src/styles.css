@@ -710,3 +710,9 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
   .signin-visual h1 { font-size: 40px; letter-spacing: -2.25px; }
   .signin-card { padding: 23px 19px; border-radius: 19px; }
 }
+
+/* Signed-in import state and sign-out confirmation */
+.signed-in-import-note { color: #317e5e; background: #effaf4; border: 1px solid #d5eddf; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; margin: 14px auto 0; padding: 9px 11px; font-size: 11px; font-weight: 700; text-align: center; }
+.signed-in-import-note svg { flex: 0 0 auto; }
+.logout-modal .choice-icon { color: #6256d7; background: #eae7ff; }
+:root[data-theme='dark'] .signed-in-import-note { color: #8ed7b6; background: #243b34; border-color: #38584c; }
