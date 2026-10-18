@@ -6,6 +6,7 @@ TrackPay is the upgrade of Spendwise: a privacy-first student transaction-analys
 
 ## Current local feature set
 
+- Separate final-style splash, sign-in, and import-start pages for the local flow.
 - Supported statement adapters: **PhonePe, GPay, Paytm, and Navi**.
 - Local source detection with a clear PhonePe/GPay/Paytm/Navi chooser when detection is uncertain.
 - Parse → **import review** → explicit save confirmation. No parsed transaction saves automatically.
