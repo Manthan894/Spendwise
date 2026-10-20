@@ -723,3 +723,12 @@ footer .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
 @media (max-width: 860px) {
   .landing-back { margin-left: auto; margin-right: auto; }
 }
+
+/* Session restoration keeps an authenticated refresh from flashing onboarding. */
+.account-loading { min-height: calc(100vh - 171px); display: flex; align-items: center; justify-content: center; gap: 12px; color: #77738a; }
+.account-loading > span { width: 44px; height: 44px; display: grid; place-items: center; color: #6659d8; background: #efecff; border-radius: 14px; }
+.account-loading strong, .account-loading p { display: block; }
+.account-loading strong { color: #4d4a62; font-size: 14px; }
+.account-loading p { color: #8c8999; font-size: 12px; margin: 3px 0 0; }
+:root[data-theme='dark'] .account-loading > span { background: #312e46; }
+:root[data-theme='dark'] .account-loading strong { color: #eeeaf5; }

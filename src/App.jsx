@@ -61,6 +61,7 @@ import {
 
 const SOURCE_APPS = SUPPORTED_SOURCE_APPS.map((value) => ({ value, label: sourceAppLabel(value) }));
 const PIE_COLORS = ['#7466e8', '#f39b64', '#4ab48a', '#62a9da', '#d673ad', '#8f86b5'];
+const LOGIN_RETURN_KEY = 'trackpay:open-import-after-login';
 
 const DEMO_TRANSACTIONS = [
   { date: '2026-10-08', time: '08:35 PM', type: 'DEBIT', amountPaise: 1000, counterparty: 'Campus Stationery', transactionId: 'DEMO-1001', description: 'Paid to Campus Stationery' },
@@ -134,6 +135,10 @@ function Logo({ compact = false }) {
 function Toast({ message, onClose }) {
   if (!message) return null;
   return <div className={`toast ${message.kind || 'info'}`} role="status">{message.kind === 'error' ? <Info size={18} /> : <CheckCircle2 size={18} />}<span>{message.text}</span><button onClick={onClose} aria-label="Close message"><X size={16} /></button></div>;
+}
+
+function AccountLoading() {
+  return <main className="account-loading shell" aria-live="polite"><span><LoaderCircle className="spin" size={24} /></span><div><strong>Opening your TrackPay account</strong><p>Restoring your secure session and saved transactions…</p></div></main>;
 }
 
 function SourceBadge({ sourceApp }) {
@@ -334,7 +339,8 @@ function App() {
   const [transactions, setTransactions] = useState(() => hasSupabaseConfig ? [] : readLocalTransactions());
   const [displayName, setDisplayName] = useState(() => readLocalProfile().displayName || '');
   const [theme, setTheme] = useState(() => localStorage.getItem('trackpay:theme') || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-  const [entryScreen, setEntryScreen] = useState('splash');
+  const [accountReady, setAccountReady] = useState(() => !hasSupabaseConfig);
+  const [entryScreen, setEntryScreen] = useState(() => sessionStorage.getItem(LOGIN_RETURN_KEY) === 'import' ? 'import' : 'splash');
   const [parsing, setParsing] = useState(false);
   const [progress, setProgress] = useState({ page: 0, total: 0 });
   const [toast, setToast] = useState(null);
@@ -367,26 +373,64 @@ function App() {
     if (!supabase) return undefined;
     let alive = true;
     const loadAccount = async (activeSession) => {
-      if (!activeSession) return;
+      if (!activeSession) {
+        if (alive) setAccountReady(true);
+        return;
+      }
+      if (alive) setAccountReady(false);
       try {
-        const [cloudTransactions, profile] = await Promise.all([fetchCloudTransactions(), fetchCloudProfile()]);
-        if (!alive) return;
-        setTransactions(cloudTransactions);
-        setDisplayName(profile?.displayName || '');
+        // A missing optional profile row must not stop transaction history from
+        // loading. This keeps old Spendwise history visible during migration.
+        const cloudTransactions = await fetchCloudTransactions();
+        if (alive) setTransactions(cloudTransactions);
+        try {
+          const profile = await fetchCloudProfile();
+          if (alive) setDisplayName(profile?.displayName || '');
+        } catch (profileError) {
+          if (alive) notify(`Could not load TrackPay profile: ${profileError.message}`, 'error');
+        }
       } catch (error) {
         if (alive) notify(`Could not load TrackPay cloud data: ${error.message}`, 'error');
+      } finally {
+        if (alive) setAccountReady(true);
       }
     };
-    supabase.auth.getSession().then(({ data }) => { if (alive) { setSession(data.session); if (data.session) setEntryScreen('import'); loadAccount(data.session); } });
+    const applySession = (activeSession) => {
+      if (!alive) return;
+      setSession(activeSession);
+      if (!activeSession) {
+        setTransactions([]);
+        setDisplayName('');
+        setView('dashboard');
+        setEntryScreen('splash');
+        setAccountReady(true);
+        return;
+      }
+      if (sessionStorage.getItem(LOGIN_RETURN_KEY) === 'import') {
+        setEntryScreen('import');
+        sessionStorage.removeItem(LOGIN_RETURN_KEY);
+      }
+      loadAccount(activeSession);
+    };
+    supabase.auth.getSession().then(({ data }) => applySession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      if (!newSession) { setTransactions([]); setDisplayName(''); setView('dashboard'); setEntryScreen('splash'); }
-      else { setEntryScreen('import'); window.setTimeout(() => loadAccount(newSession), 0); }
+      // Defer work outside the auth callback to avoid Supabase deadlocks.
+      window.setTimeout(() => applySession(newSession), 0);
     });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const onLogin = async () => { try { await signInWithGoogle(); } catch (error) { notify(error.message, 'error'); } };
+  const onLogin = async () => {
+    try {
+      // Survives the OAuth full-page redirect once, but is removed as soon as
+      // the restored session is loaded. Later browser refreshes open dashboard.
+      sessionStorage.setItem(LOGIN_RETURN_KEY, 'import');
+      await signInWithGoogle();
+    } catch (error) {
+      sessionStorage.removeItem(LOGIN_RETURN_KEY);
+      notify(error.message, 'error');
+    }
+  };
   const onLogout = async () => {
     if (!supabase) return;
     setSigningOut(true);
@@ -473,9 +517,12 @@ function App() {
   const requestedLegalPage = new URLSearchParams(window.location.search).get('page');
   const legalPage = ['privacy', 'terms', 'help'].includes(requestedLegalPage) ? requestedLegalPage : null;
   const hasData = dataTransactions.length > 0;
+  // After one OAuth return we may show the import start once. On later refreshes
+  // a signed-in user returns directly to the dashboard, including empty state.
+  const showOnboarding = !showUpload && !hasData && (!session || entryScreen === 'import');
   const setTab = (tab) => { if (tab === 'years') setView('yearly'); else { setActiveTab(tab); setView('dashboard'); } };
 
-  return <div className="app-shell"><Header session={session} displayName={displayName} onLogin={onLogin} onLogout={() => setShowLogoutConfirm(true)} cloudMode={hasSupabaseConfig} theme={theme} onTheme={toggleTheme} onEditName={() => setShowNameEditor(true)} onClearData={clearData} onDeleteAccount={() => setShowAccountDelete(true)} demoMode={demoMode} onExitDemo={exitDemo} />{!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Local development:</b> cloud sync is off. Imports stay only in this browser until Supabase is configured.</span>{transactions.length > 0 && !demoMode && <button onClick={clearData}><Trash2 size={14} /> Clear local data</button>}</div>}{legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={clearData} deletingData={deletingData} onAccountDelete={() => setShowAccountDelete(true)} /> : <>{!hasData && !showUpload ? <>{entryScreen === 'splash' ? <SplashPage onBegin={() => setEntryScreen('import')} onSignIn={() => setEntryScreen('signin')} onDemo={onDemo} cloudMode={hasSupabaseConfig} /> : entryScreen === 'signin' ? <SignInPage cloudMode={hasSupabaseConfig} onLogin={onLogin} onContinueLocal={() => setEntryScreen('import')} onDemo={onDemo} onBack={() => setEntryScreen('splash')} /> : <Landing onFile={submitForReview} parsing={parsing} progress={progress} onDemo={onDemo} onLogin={onLogin} cloudMode={hasSupabaseConfig} signedIn={Boolean(session)} onBack={() => setEntryScreen('splash')} />}</> : <>{view === 'dashboard' && <Dashboard transactions={dataTransactions} activeTab={activeTab} onTab={setTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onOpenTransaction={setTransactionDrawer} onUpload={() => setShowUpload(true)} displayName={displayName} demoMode={demoMode} onExitDemo={exitDemo} />}{view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('dashboard')} onTransaction={setGroupDrawer} />}{view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('dashboard')} onOpenTransaction={setTransactionDrawer} />}{view === 'yearly' && <YearlyAnalysis transactions={dataTransactions} onBack={() => setView('dashboard')} onUpload={() => demoMode ? exitDemo() : setShowUpload(true)} onMonthly={() => setTab('monthly')} onDaily={() => setTab('daily')} onOpenGroup={setGroupDrawer} />}</>}</>}<Footer />{showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={submitForReview} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}{sourcePicker && <SourcePicker detection={sourcePicker.detection} onClose={() => setSourcePicker(null)} onSelect={(sourceApp) => { const { file } = sourcePicker; setSourcePicker(null); submitForReview(file, sourceApp); }} />}{importReview && <ImportReview review={importReview} onConfirm={confirmImport} onClose={() => setImportReview(null)} saving={savingImport} />}{showNameEditor && <DisplayNameModal initialName={displayName} onSave={saveDisplayName} onClose={() => setShowNameEditor(false)} saving={savingName} />}{showAccountDelete && <DeleteAccountModal onDelete={deleteAccount} onClose={() => setShowAccountDelete(false)} deleting={deletingAccount} />}{showLogoutConfirm && <LogoutModal onLogout={onLogout} onClose={() => setShowLogoutConfirm(false)} signingOut={signingOut} />}{transactionDrawer && <TransactionDrawer transaction={transactionDrawer} onClose={() => setTransactionDrawer(null)} />}{groupDrawer && <GroupTransactionsDrawer transactions={groupDrawer} onClose={() => setGroupDrawer(null)} onOpen={(transaction) => { setGroupDrawer(null); setTransactionDrawer(transaction); }} />}<Toast message={toast} onClose={() => setToast(null)} /></div>;
+  return <div className="app-shell"><Header session={session} displayName={displayName} onLogin={onLogin} onLogout={() => setShowLogoutConfirm(true)} cloudMode={hasSupabaseConfig} theme={theme} onTheme={toggleTheme} onEditName={() => setShowNameEditor(true)} onClearData={clearData} onDeleteAccount={() => setShowAccountDelete(true)} demoMode={demoMode} onExitDemo={exitDemo} />{!hasSupabaseConfig && <div className="preview-banner"><Info size={15} /><span><b>Local development:</b> cloud sync is off. Imports stay only in this browser until Supabase is configured.</span>{transactions.length > 0 && !demoMode && <button onClick={clearData}><Trash2 size={14} /> Clear local data</button>}</div>}{legalPage ? <LegalPage page={legalPage} session={session} onDeleteData={clearData} deletingData={deletingData} onAccountDelete={() => setShowAccountDelete(true)} /> : <>{hasSupabaseConfig && !accountReady ? <AccountLoading /> : showOnboarding ? <>{entryScreen === 'splash' ? <SplashPage onBegin={() => setEntryScreen('import')} onSignIn={() => setEntryScreen('signin')} onDemo={onDemo} cloudMode={hasSupabaseConfig} /> : entryScreen === 'signin' ? <SignInPage cloudMode={hasSupabaseConfig} onLogin={onLogin} onContinueLocal={() => setEntryScreen('import')} onDemo={onDemo} onBack={() => setEntryScreen('splash')} /> : <Landing onFile={submitForReview} parsing={parsing} progress={progress} onDemo={onDemo} onLogin={onLogin} cloudMode={hasSupabaseConfig} signedIn={Boolean(session)} onBack={() => setEntryScreen('splash')} />}</> : <>{view === 'dashboard' && <Dashboard transactions={dataTransactions} activeTab={activeTab} onTab={setTab} monthPage={monthPage} setMonthPage={setMonthPage} onMonth={(month) => { setSelectedMonth(month); setView('month'); }} onDay={(day) => { setSelectedDay(day); setView('day'); }} onOpenTransaction={setTransactionDrawer} onUpload={() => setShowUpload(true)} displayName={displayName} demoMode={demoMode} onExitDemo={exitDemo} />}{view === 'month' && <MonthlyDetail month={selectedMonth} transactions={selectedTransactions} onBack={() => setView('dashboard')} onTransaction={setGroupDrawer} />}{view === 'day' && <DailyDetail day={selectedDay} transactions={selectedTransactions} onBack={() => setView('dashboard')} onOpenTransaction={setTransactionDrawer} />}{view === 'yearly' && <YearlyAnalysis transactions={dataTransactions} onBack={() => setView('dashboard')} onUpload={() => demoMode ? exitDemo() : setShowUpload(true)} onMonthly={() => setTab('monthly')} onDaily={() => setTab('daily')} onOpenGroup={setGroupDrawer} />}</>}</>}<Footer />{showUpload && <div className="modal-backdrop" onMouseDown={() => !parsing && setShowUpload(false)}><section className="upload-modal" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => !parsing && setShowUpload(false)} aria-label="Close"><X size={19} /></button><UploadPanel onFile={submitForReview} parsing={parsing} progress={progress} compact /><GettingStarted /></section></div>}{sourcePicker && <SourcePicker detection={sourcePicker.detection} onClose={() => setSourcePicker(null)} onSelect={(sourceApp) => { const { file } = sourcePicker; setSourcePicker(null); submitForReview(file, sourceApp); }} />}{importReview && <ImportReview review={importReview} onConfirm={confirmImport} onClose={() => setImportReview(null)} saving={savingImport} />}{showNameEditor && <DisplayNameModal initialName={displayName} onSave={saveDisplayName} onClose={() => setShowNameEditor(false)} saving={savingName} />}{showAccountDelete && <DeleteAccountModal onDelete={deleteAccount} onClose={() => setShowAccountDelete(false)} deleting={deletingAccount} />}{showLogoutConfirm && <LogoutModal onLogout={onLogout} onClose={() => setShowLogoutConfirm(false)} signingOut={signingOut} />}{transactionDrawer && <TransactionDrawer transaction={transactionDrawer} onClose={() => setTransactionDrawer(null)} />}{groupDrawer && <GroupTransactionsDrawer transactions={groupDrawer} onClose={() => setGroupDrawer(null)} onOpen={(transaction) => { setGroupDrawer(null); setTransactionDrawer(transaction); }} />}<Toast message={toast} onClose={() => setToast(null)} /></div>;
 }
 
 export default App;
