@@ -77,27 +77,43 @@ Never put these secrets in browser code or Vite variables:
 
 For a completely new Supabase project, run `supabase/schema.sql` first and then `supabase/trackpay-upgrade.sql`.
 
-## Real account deletion
+## Foundation security hardening and deployment
 
-Clearing data and deleting an account are intentionally different:
+TrackPay's cloud writes are deliberately protected rather than sent directly from the browser:
+
+- `commit-import` accepts confirmed rows only, derives duplicate fingerprints server-side, limits requests to 1 MB / 5,000 rows, validates every field, and rate-limits each account to **20 imports per hour**.
+- `save-profile`, `clear-data`, and `delete-account` authenticate the JWT themselves and have limits of **10 changes per 10 minutes**, **5 clears per hour**, and **3 deletion attempts per hour** respectively.
+- The database migration removes direct browser insert/update/delete policies. The browser can read only its own rows; mutations go only through the Edge Functions.
+- Minimal security audit records contain only account ID, action, result, and time. A scheduled database cleanup permanently removes them after **30 days**. No transaction content, amount, counterparty, identifier, file name, or IP address is captured.
+- Edge Functions reject unlisted web origins. Amplify's root `customHttp.yml` adds CSP, anti-framing, MIME, referrer, permissions, and HTTPS headers. AWS WAF is intentionally deferred from this Foundation tier.
+
+**Deploy these parts together to the separate TrackPay Supabase project.** Do not apply this migration to the existing Spendwise production project while testing.
+
+1. Copy and commit `supabase/functions`, `supabase/trackpay-security-hardening.sql`, the frontend changes, and root `customHttp.yml` to the TrackPay branch. Never commit `.env.local`, statement PDFs, uploads, or any credential.
+2. In the Supabase CLI, authenticate/link to the TrackPay project. Set the exact browser origins that may use the functions (comma separated, no trailing slash). `http://localhost:5173` is already allowed for local development; add each hosted Amplify URL separately.
+
+   ```bash
+   npx supabase secrets set ALLOWED_ORIGINS="https://YOUR-TRACKPAY-TEST.amplifyapp.com" --project-ref YOUR_TRACKPAY_PROJECT_REF
+   ```
+
+   The Supabase Edge runtime must have its server-only `SUPABASE_SERVICE_ROLE_KEY` available. It never belongs in Vite variables, Git, AWS Amplify variables, or browser code.
+3. Deploy all four functions from the repository root, then run the SQL migration in Supabase SQL Editor.
+
+   ```bash
+   npx supabase functions deploy commit-import --project-ref YOUR_TRACKPAY_PROJECT_REF
+   npx supabase functions deploy save-profile --project-ref YOUR_TRACKPAY_PROJECT_REF
+   npx supabase functions deploy clear-data --project-ref YOUR_TRACKPAY_PROJECT_REF
+   npx supabase functions deploy delete-account --project-ref YOUR_TRACKPAY_PROJECT_REF
+   ```
+
+   Run the entire contents of `supabase/trackpay-security-hardening.sql` once. It enables the daily `pg_cron` privacy-audit cleanup job as well as the rate-limit RPC and RLS write lockdown.
+4. Only after the functions and SQL migration succeed, deploy the matching TrackPay frontend to Amplify. Configure only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as frontend environment values. Add the deployed Amplify origin to Supabase Auth URL Configuration and Google OAuth redirect configuration.
+5. Smoke-test a signed-in account: import confirmed test rows, change display name, clear data, then test account deletion last. In Supabase Logs, check only expected function success/error events; do not place test statement contents in logs or tickets.
+
+Clearing data and deleting an account remain different:
 
 - **Clear saved transaction data** deletes only the signed-in user's stored transaction records.
-- **Delete TrackPay account** deletes the user's Supabase Auth identity. The database foreign-key cascades remove their TrackPay profile and transaction rows.
-
-The browser must not receive an admin key. The protected server-side function is in:
-
-```text
-supabase/functions/delete-account/index.ts
-```
-
-Before enabling the button against a real Supabase project:
-
-```bash
-supabase functions deploy delete-account
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
-```
-
-Keep that service-role value only in Supabase Edge Function secrets. Do **not** add it to `.env.local`, Vite variables, Git, or the frontend.
+- **Delete TrackPay account** deletes the user's Supabase Auth identity. Database foreign-key cascades remove the TrackPay profile, transactions, and rate-limit rows; the minimal deletion audit event remains for no more than 30 days.
 
 ## Google sign-in checklist for localhost
 
@@ -119,6 +135,7 @@ Supported PDF layouts can evolve. When source identification is uncertain, Track
 
 ```bash
 npm run build
+npm audit --omit=dev --audit-level=high
 ```
 
-The build currently succeeds. Vite reports a non-blocking bundle-size warning because PDF.js is bundled locally so the PDF is not sent to a third party.
+The current production build and production-dependency audit succeed with no reported vulnerabilities. Vite reports a non-blocking bundle-size warning because PDF.js is bundled locally so the PDF is not sent to a third party.

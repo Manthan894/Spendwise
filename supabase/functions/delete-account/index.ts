@@ -1,49 +1,42 @@
-// Deploy with: supabase functions deploy delete-account
-// Required secret (server-side only): SUPABASE_SERVICE_ROLE_KEY
-// The browser never receives the service-role key.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from '../_shared/cors.ts';
+// Deploy with: supabase functions deploy delete-account --project-ref <TRACKPAY_PROJECT_REF>
+// The browser never receives SUPABASE_SERVICE_ROLE_KEY.
+import { isAllowedOrigin, preflight } from '../_shared/cors.ts';
+import { adminClient, authenticate, audit, consumeRateLimit, json, LIMITS, requestTooLarge } from '../_shared/security.ts';
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  if (request.method === 'OPTIONS') return preflight(request);
+  if (!isAllowedOrigin(request)) return json(request, { error: 'Origin is not allowed.' }, 403);
+  if (request.method !== 'POST') return json(request, { error: 'Method not allowed.' }, 405);
+  if (requestTooLarge(request, 2_000)) return json(request, { error: 'Request is too large.' }, 413);
+
+  let user;
+  let admin;
+  try {
+    user = await authenticate(request);
+    admin = adminClient();
+    const rate = await consumeRateLimit(admin, user.id, LIMITS.deleteAccount);
+    if (!rate.allowed) {
+      await audit(admin, user.id, LIMITS.deleteAccount.action, 'rate_limited');
+      return json(request, { error: 'Too many account deletion attempts. Please wait before trying again.', retryAfterSeconds: rate.retry_after_seconds }, 429);
+    }
+  } catch (error) {
+    return json(request, { error: error.message || 'Account deletion service is unavailable.' }, error.message === 'You must be signed in.' ? 401 : 503);
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-  const authorization = request.headers.get('Authorization') || '';
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !authorization) {
-    return new Response(JSON.stringify({ error: 'Deletion service is not configured.' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  try {
+    // Deleting the Auth user cascades the profile, transactions, and rate-limit
+    // rows. It never affects the Google account. The minimal audit event is
+    // intentionally retained for 30 days without a user foreign key.
+    const { error } = await admin.auth.admin.deleteUser(user.id);
+    if (error) throw error;
+  } catch {
+    // The audit row is intentionally not populated with personal data.
+    await audit(admin, user.id, LIMITS.deleteAccount.action, 'failure');
+    return json(request, { error: 'Account deletion failed. Please contact support if the problem continues.' }, 500);
   }
 
-  // Resolve the caller from their JWT using the public anon client first.
-  const callerClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authorization } },
-  });
-  const { data: { user }, error: userError } = await callerClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ error: 'You must be signed in.' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Only the server-side function gets the admin key. Deleting the Auth user
-  // triggers the foreign-key cascades for that user's transactions and profile.
-  const admin = createClient(supabaseUrl, serviceRoleKey);
-  const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
-  if (deleteError) {
-    return new Response(JSON.stringify({ error: 'Account deletion failed.' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  return new Response(JSON.stringify({ deleted: true }), {
-    status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
+  // Do not report a successful deletion as failed if the post-deletion audit
+  // insert encounters a transient internal problem. The Auth account is gone.
+  try { await audit(admin, user.id, LIMITS.deleteAccount.action, 'success'); } catch { /* service logs retain diagnostics */ }
+  return json(request, { deleted: true }, 200);
 });

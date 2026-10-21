@@ -468,7 +468,7 @@ function App() {
     setSavingImport(true);
     try {
       const merged = mergeTransactions(transactions, importReview.newTransactions);
-      if (hasSupabaseConfig && session) await saveCloudTransactions(session.user.id, importReview.newTransactions);
+      if (hasSupabaseConfig && session) await saveCloudTransactions(importReview.newTransactions);
       else writeLocalTransactions(merged.transactions);
       setTransactions(merged.transactions);
       setImportReview(null); setView('dashboard'); setActiveTab('all');
@@ -482,7 +482,7 @@ function App() {
   const saveDisplayName = async (name) => {
     setSavingName(true);
     try {
-      if (hasSupabaseConfig && session) await saveCloudProfile(session.user.id, name);
+      if (hasSupabaseConfig && session) await saveCloudProfile(name);
       else writeLocalProfile({ displayName: name });
       setDisplayName(String(name || '').trim()); setShowNameEditor(false); notify('Your TrackPay display name was saved.');
     } catch (error) { notify(`Could not save display name: ${error.message}`, 'error'); }
@@ -494,7 +494,7 @@ function App() {
     if (!window.confirm(message)) return;
     setDeletingData(true);
     try {
-      if (hasSupabaseConfig && session) await deleteCloudTransactions(session.user.id); else clearLocalTransactions();
+      if (hasSupabaseConfig && session) await deleteCloudTransactions(); else clearLocalTransactions();
       setTransactions([]); setView('dashboard'); setEntryScreen('splash'); notify('Your saved transaction data was deleted.');
     } catch (error) { notify(`Could not delete saved data: ${error.message}`, 'error'); }
     finally { setDeletingData(false); }

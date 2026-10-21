@@ -19,9 +19,30 @@ function newestFirst(a, b) {
   return `${b.date || ''} ${b.time || ''}`.localeCompare(`${a.date || ''} ${a.time || ''}`);
 }
 
+async function functionError(error) {
+  // Supabase FunctionsHttpError keeps the API response on context. Surface a
+  // safe server-provided message while never exposing internal stack traces.
+  try {
+    const response = error?.context;
+    if (response && typeof response.clone === 'function') {
+      const body = await response.clone().json();
+      if (typeof body?.error === 'string') return body.error;
+    }
+  } catch {
+    // Fall back to the generic client error below.
+  }
+  return error?.message || 'The protected TrackPay service could not be reached.';
+}
+
+async function invokeProtectedFunction(name, body = {}) {
+  if (!supabase) throw new Error('TrackPay cloud services are not configured.');
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) throw new Error(await functionError(error));
+  return data;
+}
+
 export function readLocalTransactions() {
   try {
-    // Preserve un-synced Spendwise preview history during the TrackPay upgrade.
     const active = localStorage.getItem(STORAGE_KEY);
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
     const stored = JSON.parse(active || legacy || '[]');
@@ -90,7 +111,6 @@ export async function fetchCloudTransactions() {
   const pageSize = 1000;
   const allRows = [];
   let from = 0;
-
   while (true) {
     const { data, error } = await supabase
       .from('transactions')
@@ -108,34 +128,16 @@ export async function fetchCloudTransactions() {
   return allRows.map(databaseToTransaction).sort(newestFirst);
 }
 
-export async function saveCloudTransactions(userId, transactions) {
-  if (!supabase || !transactions.length) return;
-  const rows = transactions.map((transaction) => ({
-    user_id: userId,
-    fingerprint: buildFingerprint(transaction),
-    transaction_id: transaction.transactionId || null,
-    utr: transaction.utr || null,
-    transaction_date: transaction.date,
-    transaction_time: transaction.time || null,
-    transaction_type: transaction.type,
-    amount_paise: transaction.amountPaise,
-    counterparty: transaction.counterparty,
-    description: transaction.description || null,
-    source_page: transaction.page || null,
-    source_app: transaction.sourceApp || 'phonepe',
-    // The original PDF and its file name are intentionally not persisted.
-    source_file_name: null,
-  }));
-  const { error } = await supabase
-    .from('transactions')
-    .upsert(rows, { onConflict: 'user_id,fingerprint', ignoreDuplicates: true });
-  if (error) throw error;
+// Mutating cloud actions are intentionally functions, not direct client writes.
+// The functions derive the user ID from the JWT, validate payloads, apply rate
+// limits, and write privacy-safe audit events.
+export async function saveCloudTransactions(transactions) {
+  if (!transactions.length) return { accepted: 0 };
+  return invokeProtectedFunction('commit-import', { transactions: transactions.map(normalize) });
 }
 
-export async function deleteCloudTransactions(userId) {
-  if (!supabase) return;
-  const { error } = await supabase.from('transactions').delete().eq('user_id', userId);
-  if (error) throw error;
+export async function deleteCloudTransactions() {
+  return invokeProtectedFunction('clear-data');
 }
 
 export async function fetchCloudProfile() {
@@ -145,16 +147,10 @@ export async function fetchCloudProfile() {
   return data ? { displayName: data.display_name || '' } : null;
 }
 
-export async function saveCloudProfile(userId, displayName) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from('profiles')
-    .upsert({ user_id: userId, display_name: String(displayName || '').trim().slice(0, 60) }, { onConflict: 'user_id' });
-  if (error) throw error;
+export async function saveCloudProfile(displayName) {
+  return invokeProtectedFunction('save-profile', { displayName: String(displayName || '').trim().slice(0, 60) });
 }
 
 export async function deleteCloudAccount() {
-  if (!supabase) throw new Error('Account deletion is only available for a signed-in cloud account.');
-  const { error } = await supabase.functions.invoke('delete-account');
-  if (error) throw new Error(error.message || 'The account deletion service could not be reached.');
+  return invokeProtectedFunction('delete-account');
 }
