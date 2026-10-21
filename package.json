@@ -1,5 +1,5 @@
 {
-  "name": "spendwise",
+  "name": "trackpay",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,7 +11,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
     "lucide-react": "^0.468.0",
-    "pdfjs-dist": "^5.1.91",
+    "pdfjs-dist": "5.4.394",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
